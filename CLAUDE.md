@@ -65,6 +65,15 @@ Auth failures are terminal: exit immediately, never retry in a loop
   with "aw", "ad", "le" or "u" by chance. Never classify an id by prefix
   alone — compare against the known award id / roster ids.
 
+## Handbook text is copyrighted — never commit it
+
+Full requirement wording, intros, AHG History and Faith Connection text
+transcribed from the handbooks live only under `data/handbook/` and
+`data/badges/` (gitignored) and reach the website through the
+authenticated tracker API, never through this repo or the public site
+repo. `handbook/example.json` is the schema with invented text and is the
+only annotation in git. AHGFamily's short titles are fine to commit.
+
 ## Catalog updates need a human
 
 The live catalog (data/ahgfamily/, later the website repo's data/) changes

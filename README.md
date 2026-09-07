@@ -40,6 +40,15 @@ Flags: `--pilot` (the three pilot badges only), `--only aw…,aw…`,
 Our Flag, and Toys & Games (Pioneer/Patriot) against the handbook numbering
 and prints a diff.
 
+## From catalog to badges (Option B)
+
+`data/ahgfamily/` is the raw layer. Handbook annotations
+(`data/handbook/*.json`, gitignored — the handbook is copyrighted) add the
+full text; `npm run build:badges` merges the two into `data/badges/*.json`,
+the only shape the website and tracker read. Retired awards and
+non-current editions never reach `data/badges/`. Schema, rules and an
+invented example: [`handbook/README.md`](handbook/README.md).
+
 ## Checking AHGFamily for changes (periodic)
 
 AHG changes badges rarely — once every few years for a given award — so
