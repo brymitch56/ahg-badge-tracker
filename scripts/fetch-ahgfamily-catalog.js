@@ -16,7 +16,10 @@
  *      #level-select (level codes), csrf token
  *   3. for every award not already in data/ahgfamily/awards/:
  *        POST badge-tracker-view style=standard, one youth, that award,
- *        lockedChecked=0 → parse → scrub youth/record ids → write JSON
+ *        lockedChecked=0 → parse structure (groups, items, titles)
+ *        POST badge-tracker-view style=grid, same youth/award → level id
+ *        (the Standard fragment has none) + requirement-id cross-check
+ *        → scrub youth/record ids → write JSON
  *      ~300 ms between requests; first auth failure stops the run
  *   4. write index.json (awards + levels + failures) and print a summary
  *
@@ -33,6 +36,7 @@
  *   --force            refetch awards that already have a JSON file
  *   --keep-raw         save every raw fragment to data/ahgfamily/raw/
  *   --youth-index N    use the Nth youth id from #youth-select (default 0)
+ *   --no-grid          skip the grid request (no level id; halves the requests)
  *   --dry-run          log in and parse the index page only; no award fetches
  *
  * Exit codes: 0 ok · 1 config · 2 auth · 3 fetch · 4 every award failed to parse
@@ -48,7 +52,7 @@ const PILOT_GROUP = /pioneer\s*\/\s*patriot/i;
 
 // ------------------------------------------------------------------ args ---
 function parseArgs(argv) {
-  const a = { only: null, pilot: false, group: null, limit: Infinity, force: false, keepRaw: false, youthIndex: 0, dryRun: false };
+  const a = { only: null, pilot: false, group: null, limit: Infinity, force: false, keepRaw: false, youthIndex: 0, dryRun: false, grid: true };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     const v = () => argv[++i];
@@ -60,6 +64,7 @@ function parseArgs(argv) {
     else if (k === '--keep-raw') a.keepRaw = true;
     else if (k === '--youth-index') a.youthIndex = Number(v());
     else if (k === '--dry-run') a.dryRun = true;
+    else if (k === '--no-grid') a.grid = false;
     else if (k === '-h' || k === '--help') { console.log(fs.readFileSync(__filename, 'utf8').split('*/')[0]); process.exit(0); }
     else { console.error(`Unknown flag ${k}`); process.exit(1); }
   }
@@ -171,6 +176,10 @@ async function run(argv) {
     Object.entries(groupCounts).map(([g, n]) => `${g}=${n}`).join(', '));
   console.log(`[catalog] ${youthIds.length} youth in roster (using one id, never written to output)`);
   console.log(`[catalog] level codes: ${levelCodes.map((l) => `${l.code}=${l.label}`).join(', ') || '(no #level-select found)'}`);
+  if (args.dryRun || !levelCodes.length) {
+    const selectIds = [...indexHtml.matchAll(/<select\b[^>]*\bid=["']([^"']+)["']/gi)].map((m) => m[1]);
+    console.log(`[catalog] <select> ids on the index page: ${selectIds.join(', ') || '(none)'}`);
+  }
 
   // selection
   let todo = catalog;
@@ -225,6 +234,29 @@ async function run(argv) {
         failures.push({ awardId: meta.awardId, name: meta.name, levelGroup: meta.levelGroup, error: `parse: ${e.message}` });
         console.log(`  ✗ parse failed: ${e.message}`);
         continue;
+      }
+      if (args.grid) {
+        await A.sleep(cfg.throttleMs);
+        let gridHtml;
+        try {
+          gridHtml = await A.badgeTrackerView(cfg, jar, token, { level: 'all', style: 'grid', youthIds: [youthId], awardId: meta.awardId, lockedChecked: 0 });
+        } catch (e) {
+          if (e instanceof A.FetchError && e.code === A.EXIT.AUTH) { console.log(''); throw e; }
+          award.parse.warnings.push(`grid fetch failed: ${e.message}`);
+        }
+        if (gridHtml) {
+          if (args.keepRaw) fs.writeFileSync(path.join(paths.raw, `${meta.awardId}.grid.html`), gridHtml, { mode: 0o600 });
+          const g = P.parseGridFragment(gridHtml);
+          award.levelId = g.levelId;
+          award.source.levelIdFrom = g.levelId ? 'grid' : null;
+          if (!g.levelId) award.parse.warnings.push(`grid: no level id (${g.cells} advance-icon cells)`);
+          if (g.levelIds.length > 1) award.parse.warnings.push(`grid: multiple level ids ${g.levelIds.join(',')} — used first`);
+          const std = new Set(award.groups.flatMap((grp) => grp.items.flatMap((it) => (it.children ? it.children.map((c) => c.id) : [it.id]))).filter(Boolean));
+          const onlyGrid = g.requirementIds.filter((id) => !std.has(id));
+          const onlyStd = [...std].filter((id) => !g.requirementIds.includes(id));
+          if (onlyGrid.length || onlyStd.length) award.parse.warnings.push(`grid/standard requirement ids differ: only-grid=[${onlyGrid.join(',')}] only-standard=[${onlyStd.join(',')}]`);
+          award = P.scrubPersonal({ ...award, _recordIds: [] }, { youthIds: [...youthIds, ...g.youthIds] });
+        }
       }
       writeJson(path.join(paths.awards, `${meta.awardId}.json`), award);
       fetchedNow++;

@@ -59,6 +59,14 @@ test('fragment, whole-award-only repeatable bead: zero items, record-keyed panel
   assert.deepEqual(a._recordIds.sort(), [F.REC, F.REC2].sort());
 });
 
+test('grid fragment: level id, requirement ids, youth ids for scrubbing', () => {
+  const g = P.parseGridFragment(F.fragmentGrid);
+  assert.equal(g.levelId, F.LEVEL);
+  assert.deepEqual(g.requirementIds, [F.R[0], F.R[1]]);
+  assert.deepEqual(g.youthIds, [F.YOUTH]);
+  assert.equal(g.cells, 3);
+});
+
 test('scrubPersonal removes youth and record ids everywhere, keeps requirement ids', () => {
   const a = P.parseFragment(F.fragmentBead, { awardId: 'aw0000test01', youthId: F.YOUTH });
   a.source = { youth: F.YOUTH, note: `saw ${F.REC} and ${F.YOUTH}` };

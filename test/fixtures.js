@@ -101,4 +101,11 @@ const fragmentBead = `
 <input type="checkbox" name="purchased-${REC2}"><textarea name="comment-${REC2}"></textarea><a href="#">Delete</a></div>
 <button>Add Awards Instance</button>`;
 
-module.exports = { YOUTH, REC, REC2, LEVEL, R, indexPage, fragmentTitleFirst, fragmentLettered, fragmentBead };
+// Grid-style fragment (level id lives here; data-value is per-girl state)
+const fragmentGrid = `<table><tr><th>Item</th><th>Placeholder Girl</th></tr>
+<tr><td>1</td><td><div class="advance-icon" data-id="${R[0]}" data-yt="${YOUTH}" data-level="${LEVEL}" data-value="0"></div></td></tr>
+<tr><td>2</td><td><div class="advance-icon" data-id="${R[1]}" data-yt="${YOUTH}" data-level="${LEVEL}" data-value="1" title="Earned on: 09/01/2026"></div></td></tr>
+<tr><td>Purchased</td><td><div class="advance-icon purchased_level" data-id="p_${YOUTH}_${LEVEL}" data-yt="${YOUTH}" data-level="${LEVEL}" data-value="0"></div></td></tr>
+</table>`;
+
+module.exports = { fragmentGrid, YOUTH, REC, REC2, LEVEL, R, indexPage, fragmentTitleFirst, fragmentLettered, fragmentBead };

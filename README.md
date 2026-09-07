@@ -25,7 +25,9 @@ Node 20+, no dependencies.
 `#badge-select` / `#youth-select` / `#level-select` from
 `/advancement/index?level=all&style=grid`, then POSTs
 `/advancement/badge-tracker-view` (style=standard, one youth, lockedChecked=0)
-once per award, ~300 ms apart. Writes `data/ahgfamily/awards/<awardId>.json`
+once per award for structure, then once more in `style=grid` for the level id
+(the Standard fragment has none) and a requirement-id cross-check, ~300 ms
+apart (`--no-grid` skips the second request). Writes `data/ahgfamily/awards/<awardId>.json`
 and `data/ahgfamily/index.json`. Resume-safe: awards already on disk are
 skipped. Stops on the first auth failure. Output contains no youth ids, names,
 or `ad…` record ids (placeholders `<youthHashid>` / `<adHashid>`).
