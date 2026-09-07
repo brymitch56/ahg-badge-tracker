@@ -37,6 +37,8 @@
  *   --keep-raw         save every raw fragment to data/ahgfamily/raw/
  *   --youth-index N    use the Nth youth id from #youth-select (default 0)
  *   --no-grid          skip the grid request (no level id; halves the requests)
+ *   --staging          write to data/ahgfamily-staging/ instead of the live
+ *                      catalog (for scripts/diff-catalog.js); implies --force
  *   --dry-run          log in and parse the index page only; no award fetches
  *
  * Exit codes: 0 ok · 1 config · 2 auth · 3 fetch · 4 every award failed to parse
@@ -52,7 +54,7 @@ const PILOT_GROUP = /pioneer\s*\/\s*patriot/i;
 
 // ------------------------------------------------------------------ args ---
 function parseArgs(argv) {
-  const a = { only: null, pilot: false, group: null, limit: Infinity, force: false, keepRaw: false, youthIndex: 0, dryRun: false, grid: true };
+  const a = { only: null, pilot: false, group: null, limit: Infinity, force: false, keepRaw: false, youthIndex: 0, dryRun: false, grid: true, staging: false };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     const v = () => argv[++i];
@@ -65,6 +67,7 @@ function parseArgs(argv) {
     else if (k === '--youth-index') a.youthIndex = Number(v());
     else if (k === '--dry-run') a.dryRun = true;
     else if (k === '--no-grid') a.grid = false;
+    else if (k === '--staging') { a.staging = true; a.force = true; }
     else if (k === '-h' || k === '--help') { console.log(fs.readFileSync(__filename, 'utf8').split('*/')[0]); process.exit(0); }
     else { console.error(`Unknown flag ${k}`); process.exit(1); }
   }
@@ -72,9 +75,9 @@ function parseArgs(argv) {
 }
 
 // ----------------------------------------------------------------- paths ---
-function makePaths(env = process.env) {
+function makePaths(env = process.env, { staging = false } = {}) {
   const dataDir = path.resolve(env.DATA_DIR || path.join(__dirname, '..', 'data'));
-  const root = path.join(dataDir, 'ahgfamily');
+  const root = path.join(dataDir, staging ? 'ahgfamily-staging' : 'ahgfamily');
   return {
     root,
     awards: path.join(root, 'awards'),
@@ -148,7 +151,8 @@ function printSummary({ catalog, fetchedNow, failures, awardsDir }) {
 async function run(argv) {
   const args = parseArgs(argv);
   const cfg = A.makeConfig();
-  const paths = makePaths();
+  const paths = makePaths(process.env, { staging: args.staging });
+  if (args.staging) { fs.rmSync(paths.root, { recursive: true, force: true }); console.log(`[catalog] staging run → ${paths.root} (live catalog untouched)`); }
   fs.mkdirSync(paths.awards, { recursive: true });
 
   const jar = new A.CookieJar();

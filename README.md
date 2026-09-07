@@ -40,6 +40,28 @@ Flags: `--pilot` (the three pilot badges only), `--only aw…,aw…`,
 Our Flag, and Toys & Games (Pioneer/Patriot) against the handbook numbering
 and prints a diff.
 
+## Checking AHGFamily for changes (periodic)
+
+AHG changes badges rarely — once every few years for a given award — so
+**monthly is plenty; weekly at most.** Never nightly. Two steps, and the
+second never changes anything without a person typing "yes":
+
+```sh
+npm run fetch:staging     # fresh pull into data/ahgfamily-staging/ (live catalog untouched)
+npm run diff              # report: awards added/removed/changed, requirements +/−/~
+                          # exit 0 = no changes, 10 = changes to review
+node scripts/diff-catalog.js --md report.md   # same report as Markdown (PR body)
+node scripts/diff-catalog.js --apply          # asks for confirmation, then promotes staging
+                                              # to live; previous catalog kept as
+                                              # data/ahgfamily-previous-<stamp>/
+```
+
+`--apply` refuses to run without an interactive terminal, so a scheduled
+task can produce the report (and e-mail or post it) but can never apply it.
+`--plannable-only` hides changes inside retired awards and prior-edition
+groups. When the catalog lives in the website repo, the report is the pull
+request body and merging the PR is the approval.
+
 ## Output shape (per award)
 
 ```json

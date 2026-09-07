@@ -11,6 +11,8 @@
     "fetch:catalog": "node scripts/fetch-ahgfamily-catalog.js",
     "check:pilot": "node scripts/check-pilot-badges.js",
     "reparse": "node scripts/reparse-raw.js",
-    "test": "node --test test/parse.test.js"
+    "fetch:staging": "node scripts/fetch-ahgfamily-catalog.js --staging --keep-raw",
+    "diff": "node scripts/diff-catalog.js",
+    "test": "node --test test/parse.test.js test/diff.test.js"
   }
 }

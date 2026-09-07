@@ -65,6 +65,15 @@ Auth failures are terminal: exit immediately, never retry in a loop
   with "aw", "ad", "le" or "u" by chance. Never classify an id by prefix
   alone — compare against the known award id / roster ids.
 
+## Catalog updates need a human
+
+The live catalog (data/ahgfamily/, later the website repo's data/) changes
+only through `scripts/diff-catalog.js --apply` with an interactive "yes",
+or through a reviewed pull request carrying the diff report. Never write a
+fetch straight over the live catalog in automation, and never add an
+auto-apply path. Check cadence is monthly (weekly at most) — AHG changes
+awards every few years, so nightly is wasteful.
+
 ## Housekeeping
 
 - `npm test` must pass before any push (Node's built-in runner; tests run
