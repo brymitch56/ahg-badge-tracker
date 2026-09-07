@@ -13,7 +13,15 @@
     "reparse": "node scripts/reparse-raw.js",
     "fetch:staging": "node scripts/fetch-ahgfamily-catalog.js --staging --keep-raw",
     "diff": "node scripts/diff-catalog.js",
-    "test": "node --test test/parse.test.js test/diff.test.js test/build.test.js",
+    "test": "node --test test/parse.test.js test/diff.test.js test/build.test.js test/server.test.js",
+    "start": "node server/index.js",
+    "migrate": "node server/scripts/migrate.js",
+    "import:catalog": "node server/scripts/import-catalog.js",
     "build:badges": "node scripts/build-badges.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "express": "^4.22.2",
+    "jose": "^6.2.12"
   }
 }

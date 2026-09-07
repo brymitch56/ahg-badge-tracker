@@ -49,6 +49,32 @@ the only shape the website and tracker read. Retired awards and
 non-current editions never reach `data/badges/`. Schema, rules and an
 invented example: [`handbook/README.md`](handbook/README.md).
 
+## Tracker service (`server/`)
+
+Node/Express + SQLite, runs under systemd on the Pi beside the check-in app
+(`deploy/ahg-badge-tracker.service`). Spec: `docs/tracker-service-spec.md`;
+Entra setup: `docs/entra-setup.md`.
+
+```sh
+cp .env.example .env            # fill the "Tracker service" block
+npm install
+npm run migrate                 # apply server/migrations/*.sql
+npm run build:badges            # data/handbook → data/badges
+npm run import:catalog          # data/badges → tracker.db (versioned; also POST /api/v1/admin/catalog/import)
+npm start                       # http://127.0.0.1:3100
+curl -s http://127.0.0.1:3100/health
+```
+
+Built so far (build order steps 1–2): `/health`; MSAL bearer validation
+(tenant JWKS, issuer, audience = tracker app id, `scp`, leader group or
+e-mail allow-list; admins from `ADMIN_EMAILS`); `GET /api/v1/me`;
+`GET /api/v1/badges[?levelGroup=]`, `GET /api/v1/badges/:id`;
+`POST /api/v1/admin/catalog/import`, `GET /api/v1/admin/catalog`,
+`GET /api/v1/admin/audit`. Every request needs `Authorization: Bearer
+<token for api://<tracker-client-id>/access_as_leader>` except `/health`.
+`AUTH_DISABLED=true` (never in production) fakes an admin for local
+development.
+
 ## Checking AHGFamily for changes (periodic)
 
 AHG changes badges rarely — once every few years for a given award — so

@@ -1,0 +1,33 @@
+# systemd unit for the badge tracker service (Raspberry Pi, beside troop-checkin).
+#   sudo cp deploy/ahg-badge-tracker.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now ahg-badge-tracker
+# Install lives at /opt/ahg-badge-tracker with .env (chmod 600) and data/ owned by
+# the service user. Listens on 127.0.0.1:${PORT} only; the Cloudflare Tunnel
+# (badges.<domain>) fronts it.
+[Unit]
+Description=AHG badge tracker service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=badgetracker
+Group=badgetracker
+WorkingDirectory=/opt/ahg-badge-tracker
+EnvironmentFile=/opt/ahg-badge-tracker/.env
+Environment=NODE_ENV=production
+ExecStartPre=/usr/bin/node server/scripts/migrate.js
+ExecStart=/usr/bin/node server/index.js
+Restart=on-failure
+RestartSec=5
+# hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/ahg-badge-tracker/data
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
