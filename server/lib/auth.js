@@ -21,13 +21,17 @@ class AuthError extends Error {
   constructor(status, msg) { super(msg); this.status = status; }
 }
 
-function makeAuth(cfg, { jwks = null, issuer = null } = {}) {
+function makeAuth(cfg, { jwks = null, issuer = null, getAccess = null } = {}) {
   const a = cfg.auth;
   const iss = issuer || `https://login.microsoftonline.com/${a.tenantId}/v2.0`;
   const keys = jwks || (a.tenantId
     ? createRemoteJWKSet(new URL(`https://login.microsoftonline.com/${a.tenantId}/discovery/v2.0/keys`), { cooldownDuration: 30000, cacheMaxAge: 600000 })
     : null);
   const audiences = [a.clientId, `api://${a.clientId}`].filter(Boolean);
+  // Access lists are resolved per request so the Admin page's changes
+  // (server/lib/access.js) take effect immediately; without a provider the
+  // .env lists alone apply. An admin e-mail always counts as a leader.
+  const access = () => (getAccess ? getAccess() : { leaderGroupId: a.leaderGroupId, leaderEmails: a.leaderEmails, adminEmails: a.adminEmails });
 
   async function verify(token) {
     if (!keys || !a.clientId) throw new AuthError(500, 'auth not configured (MSAL_TENANT_ID / MSAL_CLIENT_ID)');
@@ -41,10 +45,13 @@ function makeAuth(cfg, { jwks = null, issuer = null } = {}) {
     if (!scopes.includes(a.scope)) throw new AuthError(401, `token lacks scope ${a.scope}`);
     const email = String(payload.preferred_username || payload.upn || payload.email || '').toLowerCase();
     const groups = Array.isArray(payload.groups) ? payload.groups : [];
-    const isLeader = (a.leaderGroupId && groups.includes(a.leaderGroupId)) || (email && a.leaderEmails.includes(email));
+    const acc = access();
+    const isAdmin = !!email && acc.adminEmails.includes(email);
+    const isLeader = isAdmin
+      || (acc.leaderGroupId && groups.includes(acc.leaderGroupId))
+      || (email && acc.leaderEmails.includes(email));
     if (!isLeader) throw new AuthError(403, 'signed in, but not a leader');
-    const role = email && a.adminEmails.includes(email) ? 'admin' : 'leader';
-    return { email, name: payload.name || null, oid: payload.oid || null, role, groups };
+    return { email, name: payload.name || null, oid: payload.oid || null, role: isAdmin ? 'admin' : 'leader', groups };
   }
 
   // Express middleware: requires a valid leader; optionally an admin.

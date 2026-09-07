@@ -13,6 +13,7 @@ const credcrypto = require('./lib/credcrypto');
 const plans = require('./lib/plans');
 const proposals = require('./lib/proposals');
 const ahgpull = require('./lib/ahgpull');
+const access = require('./lib/access');
 
 let VERSION = null;
 try { VERSION = require(path.join(__dirname, '..', 'package.json')).version; } catch { /* stripped install */ }
@@ -62,7 +63,7 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
     return next();
   });
 
-  const auth = makeAuth(cfg, { jwks, issuer });
+  const auth = makeAuth(cfg, { jwks, issuer, getAccess: () => access.getAccess(db, cfg) });
   const leader = auth.require('leader');
   const admin = auth.require('admin');
 
@@ -340,6 +341,17 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
   });
   api.get('/admin/catalog', admin, (req, res) => {
     res.json({ current: catalog.currentVersion(db), versions: db.prepare('SELECT * FROM catalog_versions ORDER BY id DESC LIMIT 20').all(), badgesDir: cfg.badgesDir });
+  });
+  // Leaders & admins, managed from the website (server/lib/access.js —
+  // .env entries stay merged in and cannot be removed here).
+  api.get('/admin/access', admin, (req, res) => res.json(access.accessView(db, cfg)));
+  api.post('/admin/access', admin, (req, res) => {
+    try {
+      return res.json(access.setAccess(db, cfg, req.body || {}, req.user.email));
+    } catch (e) {
+      if (e instanceof access.AccessError) return res.status(e.status).json({ error: e.message });
+      throw e;
+    }
   });
   api.get('/admin/audit', admin, (req, res) => {
     const limit = Math.min(Number(req.query.limit) || 100, 500);
