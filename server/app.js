@@ -11,6 +11,7 @@ const { verifySignature, markDelivery } = require('./lib/webhook');
 const mapping = require('./lib/mapping');
 const credcrypto = require('./lib/credcrypto');
 const plans = require('./lib/plans');
+const proposals = require('./lib/proposals');
 
 let VERSION = null;
 try { VERSION = require(path.join(__dirname, '..', 'package.json')).version; } catch { /* stripped install */ }
@@ -40,7 +41,7 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
     res.json({ ok: true, duplicate: !fresh });
     if (fresh) {
       app.locals.webhookWork = Promise.resolve(app.locals.webhookWork)
-        .then(() => mirror.handleWebhook(db, checkin, payload, { log: console.error }));
+        .then(() => mirror.handleWebhook(db, checkin, payload, { log: console.error, tz: cfg.tz }));
     }
     return undefined;
   });
@@ -183,10 +184,46 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
     }
   }));
 
+  // ---------------------------------------------- proposals & completions --
+  const completionErr = (res, err) => {
+    if (err instanceof proposals.CompletionError) return res.status(err.status).json({ error: err.message });
+    throw err;
+  };
+  api.get('/events/:id/proposals', leader, (req, res) => withEvent(req, res, (e) => res.json(proposals.eventProposals(db, e))));
+  api.post('/events/:id/proposals/decide', leader, (req, res) => withEvent(req, res, (e) => {
+    try {
+      return res.json({ decided: proposals.decide(db, e, req.body, req.user.email) });
+    } catch (err) { return completionErr(res, err); }
+  }));
+  api.post('/completions', leader, (req, res) => {
+    try {
+      const c = proposals.manualCompletion(db, req.body || {}, req.user.email);
+      return res.status(201).json({ id: c.id, girlId: c.girl_id, requirementId: c.requirement_id, status: c.status, completedOn: c.completed_on, levelAtCompletion: c.level_at_completion, source: c.source });
+    } catch (err) { return completionErr(res, err); }
+  });
+  api.delete('/completions/:id', leader, (req, res) => {
+    try {
+      proposals.deleteCompletion(db, Number(req.params.id), req.user.email);
+      return res.json({ ok: true });
+    } catch (err) { return completionErr(res, err); }
+  });
+
+  api.get('/girls/:id/progress', leader, (req, res) => {
+    const g = db.prepare('SELECT * FROM girls WHERE id = ?').get(req.params.id);
+    if (!g) return res.status(404).json({ error: 'not found' });
+    const levelGroup = typeof req.query.levelGroup === 'string' ? req.query.levelGroup : null;
+    return res.json({ girl: girlOut(g), badges: proposals.girlProgress(db, g, { levelGroup }) });
+  });
+  api.get('/badges/:id/progress', leader, (req, res) => {
+    const b = db.prepare('SELECT * FROM badges WHERE id = ?').get(req.params.id);
+    if (!b) return res.status(404).json({ error: 'not found' });
+    return res.json(proposals.badgeProgress(db, b));
+  });
+
   // ------------------------------------------------------------------ sync --
   api.post('/sync/checkin', admin, async (req, res) => {
     try {
-      res.json(await mirror.syncCheckin(db, checkin));
+      res.json(await mirror.syncCheckin(db, checkin, { tz: cfg.tz }));
     } catch (e) {
       if (e instanceof CheckinError) return res.status(502).json({ error: 'check-in sync failed', detail: e.message });
       throw e;

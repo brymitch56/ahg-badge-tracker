@@ -29,9 +29,8 @@ copyright rule). Then this file, then `docs/tracker-service-spec.md` (draft 3).
   (lib/parse.js; names live only in tracker.db), encrypted credential store
   (`server/lib/credcrypto.js` + `POST /admin/ahgfamily/credentials`),
   rule-8 auth latch, `GET/POST /admin/mapping(/refresh|/confirm)` with
-  unambiguous name-match suggestions, leader-confirmed. No in-process
-  scheduler yet — syncs run on webhooks and the admin endpoint; the §7
-  interval jobs land with step 5 when proposals give the sweep a purpose.
+  unambiguous name-match suggestions, leader-confirmed. (The §7 scheduler
+  landed with step 5 — see below.)
 - **Step 4 (plans)**: `server/lib/plans.js` + `GET /events/:id/plans`,
   `PUT /events/:id/plans/:levelGroup` (URL-encode `Pioneer%2FPatriot`).
   Plan level groups are the three badge-working units (Tenderheart,
@@ -42,7 +41,24 @@ copyright rule). Then this file, then `docs/tracker-service-spec.md` (draft 3).
   it); removing an item with a live completion is a 409, rejected
   completions release the item but keep their history, participation
   cascades. Empty PUT deletes the plan. Everything audited.
-- **Tests**: `npm test` → 47 passing, all offline (synthetic fixtures —
+- **Step 5 (proposals & progress)**: `server/lib/proposals.js` — rule 3
+  applied idempotently on every attendance re-poll (webhook, sweep, admin
+  sync): session/finish propose (dated the event's local day), start/
+  continue record participation; rule 4b (only `open: 0` rows) and unit
+  filtering (a PiPa plan applies to Pioneer+Patriot girls). Rule 5
+  reconcile: an un-attended girl's proposed rows withdraw and her
+  participation clears; confirmed rows get `needs_review` (migration 003),
+  shown on the proposals screen, cleared by re-confirm or retracted by
+  reject. Decide endpoint is all-or-nothing and stamps
+  `level_at_completion` from the girl's current level (rule 9).
+  `POST/DELETE /completions` (manual, rule 4; delete refuses once pushed).
+  Progress: `GET /girls/:id/progress` (+`?levelGroup=`),
+  `GET /badges/:id/progress`, badge_status derived per rule 1 (`all` /
+  `n_of`, NULL rule = all). `server/lib/scheduler.js` (§7): nightly events,
+  weekly roster, attendance sweep from end_at+30 min until a post-event
+  fetch finds no open rows (`events.attendance_fetched_at`); started by
+  index.js unless `DISABLE_SCHEDULER`.
+- **Tests**: `npm test` → 55 passing, all offline (synthetic fixtures —
   invented names/ids only — local JWKS, in-memory SQLite).
 - **Verified on Bryan's PC (Sept 7)**: `npm run migrate`,
   `npm run import:catalog` (version 1: 3 badges, 32 requirements),
@@ -83,10 +99,8 @@ copyright rule). Then this file, then `docs/tracker-service-spec.md` (draft 3).
   `npm run diff`, `--apply` with an interactive "yes"). Never nightly, never
   auto-apply.
 
-## Build order (spec §10) — next is step 5
+## Build order (spec §10) — next is step 6
 
-5. Proposals from attendance (rule 3/4b), decide endpoint, per-girl and
-   per-badge progress views, `badge_status` derivation (all / n_of).
 6. AHGFamily pull (grid view per active badge per girl) → `ahg_state`,
    conflicts.
 7. Push behind the flag: read-before-write toggle, `dateSpecified` = the

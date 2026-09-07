@@ -168,6 +168,7 @@ async function refreshAttendance(db, client, eventRow) {
         rows += 1;
         if (a.open) open += 1;
       }
+      db.prepare('UPDATE events SET attendance_fetched_at = ? WHERE id = ?').run(ts, eventRow.id);
       return { eventId: eventRow.id, checkinEventId: eventRow.checkin_event_id, rows, open };
     });
     return write();
@@ -179,7 +180,8 @@ async function refreshAttendance(db, client, eventRow) {
  * Act on a verified, de-duplicated check-in webhook payload. Never throws —
  * a webhook must never be able to crash the service.
  */
-async function handleWebhook(db, client, payload, { log = () => {} } = {}) {
+async function handleWebhook(db, client, payload, { log = () => {}, tz = 'America/New_York' } = {}) {
+  const proposals = require('./proposals'); // lazy: avoids an import cycle if proposals ever needs mirror helpers
   try {
     if (payload.type === 'test') return { acted: 'none' };
     if (payload.type === 'ical.synced') {
@@ -196,7 +198,10 @@ async function handleWebhook(db, client, payload, { log = () => {} } = {}) {
       }
       if (!ev) return { acted: 'none', reason: 'event not in mirror' };
       const s = await refreshAttendance(db, client, ev);
-      return { acted: 'attendance', ...s };
+      // rule 3 on every re-poll: new sign-outs propose; a voided txn that
+      // un-attended a girl withdraws/flags through the same reconcile
+      const p = proposals.proposeForEvent(db, ev, tz);
+      return { acted: 'attendance', ...s, proposals: p };
     }
     return { acted: 'none', reason: `unknown type ${payload.type}` };
   } catch (e) {
@@ -205,8 +210,9 @@ async function handleWebhook(db, client, payload, { log = () => {} } = {}) {
   }
 }
 
-/** Full check-in refresh: events, roster, attendance for recent events. */
-async function syncCheckin(db, client, { attendanceDays = 14 } = {}) {
+/** Full check-in refresh: events, roster, attendance + proposals for recent events. */
+async function syncCheckin(db, client, { attendanceDays = 14, tz = 'America/New_York' } = {}) {
+  const proposals = require('./proposals');
   const events = await syncEvents(db, client);
   const people = await syncPeople(db, client);
   const since = new Date(Date.now() - attendanceDays * 86400e3).toISOString();
@@ -215,7 +221,8 @@ async function syncCheckin(db, client, { attendanceDays = 14 } = {}) {
   const attendance = [];
   for (const ev of recent) {
     try {
-      attendance.push(await refreshAttendance(db, client, ev));
+      const s = await refreshAttendance(db, client, ev);
+      attendance.push({ ...s, proposals: proposals.proposeForEvent(db, ev, tz) });
     } catch (e) {
       if (e instanceof CheckinError && e.status === 404) continue; // event gone on the check-in side
       throw e;

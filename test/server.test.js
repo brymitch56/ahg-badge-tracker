@@ -62,7 +62,7 @@ test.after(() => { server.close(); db.close(); fs.rmSync(badgesDir, { recursive:
 
 test('migrations apply once and are idempotent', () => {
   const d = openDb(':memory:');
-  assert.deepEqual(migrate(d), ['001-init.sql', '002-checkin.sql']);
+  assert.deepEqual(migrate(d), ['001-init.sql', '002-checkin.sql', '003-review.sql']);
   assert.deepEqual(migrate(d), []);
   const tables = d.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map((r) => r.name);
   for (const t of ['badges', 'requirements', 'girls', 'events', 'plans', 'plan_items', 'completions', 'participation', 'ahg_state', 'push_queue', 'sync_runs', 'settings', 'audit_log']) assert.ok(tables.includes(t), t);
