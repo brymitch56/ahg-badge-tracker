@@ -39,7 +39,7 @@ their history).
 |---|---|
 | `PORT` | `3100` (the service listens on 127.0.0.1 only) |
 | `TZ` | the troop's zone, e.g. `America/New_York` |
-| `CHECKIN_BASE` | `http://127.0.0.1:3000` |
+| `CHECKIN_BASE` | the **AHG** check-in instance — `http://127.0.0.1:3000`, or its actual port on a Pi running more than one instance (e.g. `:3001`); wire the key/webhook in **that** instance's admin, or the tracker mirrors the wrong troop |
 | `CHECKIN_API_KEY` | from the check-in app, step 4 |
 | `CHECKIN_WEBHOOK_SECRET` | from the check-in app, step 4 |
 | `SITE_ORIGIN` | the website origin (CORS) — set with Entra, step 6 |
