@@ -8,15 +8,20 @@ const catalog = require('./lib/catalog');
 const { makeCheckinClient, CheckinError } = require('./lib/checkin');
 const mirror = require('./lib/mirror');
 const { verifySignature, markDelivery } = require('./lib/webhook');
+const mapping = require('./lib/mapping');
+const credcrypto = require('./lib/credcrypto');
 
 let VERSION = null;
 try { VERSION = require(path.join(__dirname, '..', 'package.json')).version; } catch { /* stripped install */ }
 
-function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefined }) {
+function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefined, ahgFetchHtml = undefined }) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 1); // Cloudflare tunnel in front
   const checkin = makeCheckinClient(cfg.checkin, checkinFetch ? { fetchImpl: checkinFetch } : {});
+  // Key for the stored AHGFamily password: from config in tests, else .env
+  // (generated on first credential save).
+  const credKey = () => (cfg.credKeyHex ? Buffer.from(cfg.credKeyHex, 'hex') : credcrypto.loadKey());
 
   // Check-in webhook — registered BEFORE the JSON body parser because the
   // HMAC is over the raw body bytes. HMAC only, no bearer, no CORS (server
@@ -70,6 +75,7 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
       ok: true, app: 'ahg-badge-tracker', version: VERSION, now: new Date().toISOString(), tz: cfg.tz,
       catalog: v ? { version: v.id, importedAt: v.imported_at, badges: v.badge_count, requirements: v.requirement_count } : null,
       checkin: checkinState,
+      ahgfamily: mapping.getLatch(db) ? 'latched' : mapping.credentialsState(db, credKey()),
       auth: cfg.auth.disabled ? 'DISABLED' : (cfg.auth.tenantId && cfg.auth.clientId ? 'msal' : 'unconfigured'),
     });
   });
@@ -178,6 +184,54 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
       runs: lastByKind.map((r) => ({ kind: r.kind, startedAt: r.started_at, finishedAt: r.finished_at, ok: r.ok === null ? null : !!r.ok, summary: r.summary ? JSON.parse(r.summary) : null, error: r.error })),
       webhookDeliveries: db.prepare('SELECT COUNT(*) AS n FROM webhook_txns').get().n,
     });
+  });
+
+  // ------------------------------------- AHGFamily mapping & credentials --
+  api.post('/admin/ahgfamily/credentials', admin, (req, res) => {
+    const { email, password } = req.body || {};
+    if (typeof email !== 'string' || !email.includes('@') || typeof password !== 'string' || !password) {
+      return res.status(400).json({ error: 'email and password required' });
+    }
+    try {
+      mapping.storeCredentials(db, { email, password }, req.user.email, credKey() || credcrypto.ensureKey());
+    } catch (e) {
+      return res.status(500).json({ error: 'could not store credentials', detail: e.message });
+    }
+    return res.json({ ok: true, latchCleared: true });
+  });
+
+  api.get('/admin/mapping', admin, (req, res) => {
+    const v = mapping.mappingView(db);
+    const byYouthId = new Map(v.girls.filter((g) => g.ahg_youth_id).map((g) => [g.ahg_youth_id, g.id]));
+    res.json({
+      fetchedAt: v.stored ? v.stored.fetchedAt : null,
+      latched: !!mapping.getLatch(db),
+      youth: v.stored ? v.stored.youth.map((y) => ({ ...y, girlId: byYouthId.get(y.id) ?? null })) : [],
+      unmappedGirls: v.unmapped.map((g) => ({ id: g.id, firstName: g.first_name, lastName: g.last_name, nickname: g.nickname, ahgLevel: g.ahg_level })),
+      suggestions: v.suggestions,
+    });
+  });
+
+  api.post('/admin/mapping/refresh', admin, async (req, res) => {
+    try {
+      const s = await mapping.refreshYouthSelect(db, {
+        ...(ahgFetchHtml ? { fetchHtml: ahgFetchHtml } : {}), key: credKey(), actor: req.user.email,
+      });
+      res.json(s);
+    } catch (e) {
+      const status = e.code === 'latched' ? 409 : e.code === 'noconfig' ? 400 : 502;
+      res.status(status).json({ error: 'refresh failed', detail: e.message, latched: !!mapping.getLatch(db) });
+    }
+  });
+
+  api.post('/admin/mapping/confirm', admin, (req, res) => {
+    const pairs = Array.isArray(req.body) ? req.body : req.body?.pairs;
+    if (!Array.isArray(pairs) || !pairs.length) return res.status(400).json({ error: 'body must be [{ girlId, ahgYouthId }, …]' });
+    try {
+      return res.json({ applied: mapping.confirmMappings(db, pairs, req.user.email) });
+    } catch (e) {
+      return res.status(e.code === 'conflict' ? 409 : 400).json({ error: e.message });
+    }
   });
 
   api.post('/admin/catalog/import', admin, (req, res) => {

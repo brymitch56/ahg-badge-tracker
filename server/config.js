@@ -32,6 +32,9 @@ function makeConfig(env = process.env) {
       apiKey: env.CHECKIN_API_KEY || '',
       webhookSecret: env.CHECKIN_WEBHOOK_SECRET || '',
     },
+    // Key that encrypts the stored AHGFamily password (server/lib/credcrypto.js);
+    // auto-generated into .env on first credential save when absent.
+    credKeyHex: /^[0-9a-fA-F]{64}$/.test(env.CRED_KEY || '') ? env.CRED_KEY : '',
   };
 }
 
