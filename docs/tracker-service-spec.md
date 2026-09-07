@@ -15,7 +15,7 @@ It does not render pages — the website does — and it does not own attendance
 | Runtime | Node 20, Express, `better-sqlite3`, no ORM. Same stack as the check-in app so there is one thing to know how to operate. |
 | Where | Pi, Docker container beside `troop-checkin`, its own volume for `data/` (database, `badges/`, backups). Same-host HTTP to the check-in API. |
 | Public entry | Second hostname on the existing Cloudflare Tunnel — **`badges.<domain>`** (decided) — HTTPS terminated by Cloudflare. Keeps cookies and CORS separate from the check-in app. |
-| Config | `.env` (gitignored): `PORT`, `PUBLIC_URL`, `SITE_ORIGIN` (the one origin allowed for CORS), `MSAL_TENANT_ID`, `MSAL_CLIENT_ID` (audience), `LEADER_GROUP_ID` or `LEADER_EMAILS`, `ADMIN_EMAILS`, `CHECKIN_BASE`, `CHECKIN_API_KEY`, `CHECKIN_WEBHOOK_SECRET`, `AHG_BASE`, `CRED_KEY` (auto-generated, encrypts the stored AHGFamily password), `TZ`. |
+| Config | `.env` (gitignored): `PORT`, `PUBLIC_URL`, `SITE_ORIGIN` (the one origin allowed for CORS), `MSAL_TENANT_ID`, `MSAL_CLIENT_ID` (audience), `LEADER_GROUP_ID` or `LEADER_EMAILS`, `ADMIN_EMAILS`, `CHECKIN_BASE`, `CHECKIN_API_KEY`, `CHECKIN_WEBHOOK_SECRET`, `AHG_BASE`, `CRED_KEY` (auto-generated, encrypts the stored AHGFamily password), `TZ`, mail: `SMTP_URL` (or `SENDGRID_API_KEY`-style provider), `REPORT_FROM`, `REPORT_EMAILS`. |
 | Backups | Nightly SQLite backup to the volume, same pattern as the check-in app; the catalog JSON is reproducible from the `ahg-badge-tracker` build and doesn't need backing up separately. |
 
 ## 3. Authentication and authorization
@@ -111,7 +111,7 @@ Errors: `{ error: "…" }` with 400/401/403/404/409. Pagination only where lists
 | Check-in roster | weekly + on demand | `GET /people`, upsert girls; flag unmatched/visitors. |
 | Attendance & proposals | 30 min after each event's `end_at`, and on `txn.*` webhooks | Pull attendance, apply rule 3. |
 | AHGFamily pull | weekly, and always immediately before a push | Grid state per active badge per girl (only badges with any activity here — not all 548). |
-| AHGFamily push | **weekly (decided)**, plus admin "Push now" | Drain the queue, read-before-write, latch on auth failure. Each run writes a `sync_runs` row and a per-item log (girl, badge, requirement, date, result, error); the report is visible in the admin page and e-mailed/posted if configured. Ships behind the flag, off until steps 1–6 have run through a real meeting. |
+| AHGFamily push | **weekly (decided)**, plus admin "Push now" | Drain the queue, read-before-write, latch on auth failure. Each run writes a `sync_runs` row and a per-item log (girl, badge, requirement, date, result, error). The run report is **e-mailed after every weekly run** (decided) to `REPORT_EMAILS`; a setting `report_mode` = `always` (default) | `errors_only` lets an admin later reduce it to failed/held items and latch events. A run that pushed nothing still sends a one-line "nothing to push" mail in `always` mode so silence is never ambiguous. Report is also visible in the admin page. Ships behind the flag, off until steps 1–6 have run through a real meeting. |
 | Backup | nightly | SQLite backup to the volume. |
 
 Catalog *checking* (fetch → diff → approve) stays a monthly manual step in the `ahg-badge-tracker` repo, per your rule; the tracker only imports an approved build.
@@ -126,7 +126,7 @@ Badge catalog browser (with SharePoint page images inline) · Planning calendar 
 2. **Levels** — TH/EX badges earnable at both levels (separate awards); PiPa once, at the girl's current level; no retroactive handling in the tracker (done in AHGFamily directly).
 3. **Admins** — Bryan, the Troop Coordinator, and the leader who manages the tenant/SharePoint (`ADMIN_EMAILS`).
 4. **Token audience** — do it properly: separate app registration exposing `access_as_leader` (`docs/entra-setup.md`).
-5. **Push timing** — weekly automatic, with a full log/report of what pushed, when, and any errors.
+5. **Push timing** — weekly automatic, with a full log/report of what pushed, when, and any errors, **e-mailed after every run**; switchable to errors-only later (`report_mode`).
 6. **Hostname** — `badges.<domain>`, separate from the check-in hostname.
 7. **Attended** — requires a sign-out (`open: 0`); missed sign-outs are closed by the SMS confirmation feature, so the tracker simply waits.
 
