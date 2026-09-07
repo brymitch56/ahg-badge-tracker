@@ -20,7 +20,7 @@
     "build:badges": "node scripts/build-badges.js"
   },
   "dependencies": {
-    "better-sqlite3": "^13.0.3",
+    "better-sqlite3": "^12.4.1",
     "express": "^4.22.2",
     "jose": "^6.2.12"
   }

@@ -51,7 +51,11 @@ invented example: [`handbook/README.md`](handbook/README.md).
 
 ## Tracker service (`server/`)
 
-Node/Express + SQLite, runs under systemd on the Pi beside the check-in app
+Node/Express + SQLite (`better-sqlite3`, pinned to a release that ships
+prebuilt binaries for Node 20/22 on Windows x64 and Linux arm64 — bumping it
+means checking a prebuilt exists for every platform first, or `npm install`
+falls back to a from-source build needing Python + a C++ toolchain), runs under
+systemd on the Pi beside the check-in app
 (`deploy/ahg-badge-tracker.service`). Spec: `docs/tracker-service-spec.md`;
 Entra setup: `docs/entra-setup.md`.
 
