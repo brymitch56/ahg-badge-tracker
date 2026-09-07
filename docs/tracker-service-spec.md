@@ -1,6 +1,6 @@
 # Badge tracker service — draft spec for review
 
-*Draft 1 · Sept 7, 2026 · for discussion before any code*
+*Draft 2 · Sept 7, 2026 · decisions from Bryan folded in (§9); build order approved pending the check-in roster answers*
 
 ## 1. What it is
 
@@ -14,13 +14,13 @@ It does not render pages — the website does — and it does not own attendance
 |---|---|
 | Runtime | Node 20, Express, `better-sqlite3`, no ORM. Same stack as the check-in app so there is one thing to know how to operate. |
 | Where | Pi, Docker container beside `troop-checkin`, its own volume for `data/` (database, `badges/`, backups). Same-host HTTP to the check-in API. |
-| Public entry | Second hostname on the existing Cloudflare Tunnel (e.g. `badges.<domain>`), HTTPS terminated by Cloudflare. Keeps cookies and CORS separate from the check-in app. |
+| Public entry | Second hostname on the existing Cloudflare Tunnel — **`badges.<domain>`** (decided) — HTTPS terminated by Cloudflare. Keeps cookies and CORS separate from the check-in app. |
 | Config | `.env` (gitignored): `PORT`, `PUBLIC_URL`, `SITE_ORIGIN` (the one origin allowed for CORS), `MSAL_TENANT_ID`, `MSAL_CLIENT_ID` (audience), `LEADER_GROUP_ID` or `LEADER_EMAILS`, `ADMIN_EMAILS`, `CHECKIN_BASE`, `CHECKIN_API_KEY`, `CHECKIN_WEBHOOK_SECRET`, `AHG_BASE`, `CRED_KEY` (auto-generated, encrypts the stored AHGFamily password), `TZ`. |
 | Backups | Nightly SQLite backup to the volume, same pattern as the check-in app; the catalog JSON is reproducible from the `ahg-badge-tracker` build and doesn't need backing up separately. |
 
 ## 3. Authentication and authorization
 
-**Leaders (website → API).** The leaders area signs in with MSAL against the church tenant and already holds an access token. It sends it as `Authorization: Bearer <token>` to the tracker. The tracker validates signature (tenant JWKS, cached), issuer, audience (`MSAL_CLIENT_ID` — the website's app registration needs an exposed API scope, e.g. `access_as_leader`, so the token is minted *for the tracker*, not for Graph), expiry, and then membership: either the `groups` claim contains `LEADER_GROUP_ID`, or the `preferred_username` is in `LEADER_EMAILS`. Two roles: **leader** (plan, confirm, view everything) and **admin** (settings, credentials, push controls, catalog import) — admin = leader who is also in `ADMIN_EMAILS`. No sessions, no cookies, no CSRF surface. CORS allows exactly `SITE_ORIGIN`.
+**Leaders (website → API).** The leaders area signs in with MSAL against the church tenant and already holds an access token. It sends it as `Authorization: Bearer <token>` to the tracker. The tracker validates signature (tenant JWKS, cached), issuer, audience (`MSAL_CLIENT_ID` — a **separate app registration for the tracker** exposing `access_as_leader`; the website requests that scope so the token is minted *for the tracker*, never a Graph token — steps in `docs/entra-setup.md`), expiry, `scp`, and then membership: either the `groups` claim contains `LEADER_GROUP_ID`, or the `preferred_username` is in `LEADER_EMAILS`. Two roles: **leader** (plan, confirm, view everything) and **admin** (settings, credentials, push controls, catalog import) — admin = leader who is also in `ADMIN_EMAILS` (decided: Bryan, the Troop Coordinator, and the leader who administers the tenant/SharePoint). No sessions, no cookies, no CSRF surface. CORS allows exactly `SITE_ORIGIN`.
 
 **Check-in app → tracker (webhook).** HMAC per the Integration API contract (timestamp + raw body, 5-minute window). Deduplicate on `txn.id`.
 
@@ -43,7 +43,7 @@ A retired award or a non-current edition never reaches `data/badges/`, so the tr
 
 **People and events (mirrored from the check-in app)**
 
-- `girls` — `id, checkin_person_id, member_id, first_name, last_name, nickname, level (as the roster carries it), ahg_level (Explorer|Pioneer|…, normalized), ahg_youth_id (u… hashid, nullable until mapped), active, updated_at`. Names live here because leaders need to see them; this database is on the Pi, never in git, and the API only serves them to authenticated leaders.
+- `girls` — `id, checkin_person_id, member_id, first_name, last_name, nickname, level (as the roster carries it), ahg_level (Pathfinder|Tenderheart|Explorer|Pioneer|Patriot, normalized, refreshed every roster sync), ahg_youth_id (u… hashid, nullable until mapped), active, updated_at`. Mapping source pending the check-in session's answers (`docs/handoff-to-checkin-roster-identity.md`): `tlc_user_id` if the AHG export carries the hashid, else a one-time admin mapping screen. Names live here because leaders need to see them; this database is on the Pi, never in git, and the API only serves them to authenticated leaders.
 - `events` — `id, checkin_event_id, ical_uid, start_at, end_at, title, location, all_day, removed_from_feed, updated_at`. Identity is `ical_uid + start_at`, falling back to `checkin_event_id` for manual events — the same rule the check-in app uses.
 - `attendance` — `event_id, girl_id, signed_in_at, signed_out_at, open, source_txn_ids (json), fetched_at`. Snapshot of the check-in answer; refreshed on webhook and on poll.
 
@@ -54,14 +54,14 @@ A retired award or a non-current edition never reaches `data/badges/`, so the tr
 
 **Completion**
 
-- `completions` — `id, girl_id, requirement_id, status (proposed|confirmed|rejected), completed_on (date), event_id (nullable — done at home), plan_item_id (nullable), source (attendance|manual|ahgfamily), proposed_at, decided_by, decided_at, notes`. Unique on `(girl_id, requirement_id)` among non-rejected rows.
+- `completions` — `id, girl_id, requirement_id, status (proposed|confirmed|rejected), completed_on (date), event_id (nullable — done at home), plan_item_id (nullable), source (attendance|manual|ahgfamily), level_at_completion (the girl's ahg_level when confirmed), proposed_at, decided_by, decided_at, notes`. Unique on `(girl_id, requirement_id)` among non-rejected rows.
 - `participation` — `girl_id, plan_item_id, event_id`. Recorded when a girl attends a `start`/`continue` session; shown as "present for 1 of 2 sessions" when a leader decides the eventual completion.
 - `badge_status` — a *view*, not a table: per girl per badge, computed from confirmed completions and the group rules (`all` ⇒ every requirement; `n_of` ⇒ at least *n*). Yields `not_started | in_progress | complete`, plus `ahgfamily_state` from the last sync.
 
 **AHGFamily sync**
 
 - `ahg_state` — `girl_id, requirement_id, completed (0/1), earned_on, comment, ad_record_id, fetched_at` (the `ad…` record id is per girl; it lives only in this database and is never exported). What AHGFamily currently says, per girl per requirement.
-- `push_queue` — `id, girl_id, requirement_id, completion_id, action (mark|unmark|badge_complete), date, status (queued|sent|failed|skipped|held), attempts, last_error, created_at, sent_at`.
+- `push_queue` — `id, girl_id, requirement_id, completion_id, action (mark|unmark|badge_complete), date, level_id (the le… resolved from the girl's level at push time), status (queued|sent|failed|skipped|held), attempts, last_error, created_at, sent_at`. Every row is the push log: what, for whom, when, result, error — the weekly run report is built from it.
 - `sync_runs` — `id, kind (pull|push|catalog), started_at, finished_at, ok, summary (json), error`.
 - `settings` — key/value: AHGFamily credentials (encrypted box), push enabled flag, auth-failure latch, last catalog version, schedule choices.
 
@@ -73,13 +73,15 @@ A retired award or a non-current edition never reaches `data/badges/`, so the tr
 
 1. **Badge complete** is derived, never set by hand: all `all`-groups fully done and every `n_of` group at its threshold. A leader can't tick "badge complete" — they complete requirements.
 2. **Proposed ≠ done.** Attendance only ever creates `proposed` rows. A leader confirms or rejects; nothing rolls up or pushes until confirmed.
-3. **Multi-session.** For each present girl and each plan item: role `session` or `finish` → propose a completion dated the event's local date; role `start` or `continue` → record participation only. A `finish` proposal shows the girl's participation count for that requirement so the leader can judge.
+3. **Multi-session.** For each *attended* girl and each plan item: role `session` or `finish` → propose a completion dated the event's local date; role `start` or `continue` → record participation only. A `finish` proposal shows the girl's participation count for that requirement so the leader can judge.
 4. **Home completions** are manual: a leader adds a confirmed completion with a date and no event.
+4b. **Attended means signed out.** A girl counts as present for an event only when the check-in app reports her row with `open: 0` — a sign-out exists (kiosk, admin close, or the SMS pickup confirmation). Open sign-ins never propose anything; the tracker re-polls the event on every sign-out webhook and on the scheduled sweep until no rows are open, then stops. Campouts and meetings follow the same rule.
 5. **Voided sign-ins.** On `txn.voided`, withdraw any *proposed* completion that rests on that transaction; if already confirmed, flag it for review rather than reverting.
 6. **AHGFamily is a second source of truth.** A pull that finds an item complete on AHGFamily but not here creates a `confirmed` completion with `source: ahgfamily` and AHGFamily's date. An item confirmed here and not there is queued to push. Complete here but later *un-checked* there is surfaced as a conflict for a leader, never resolved silently.
 7. **Push is per requirement and read-before-write.** `process-advancement` toggles; the service reloads the girl's grid state immediately before each write and skips items already complete. `dateSpecified` is the completion's date, not today. Whole-badge `completed_on` is set only via the Standard-view form post, only when rule 1 says the badge is complete, and only after every requirement push succeeded. The delete endpoint is never called.
 8. **Auth-failure latch.** One failed AHGFamily login disables all AHGFamily traffic until an admin re-enters credentials — the check-in app's rule, verbatim, because a locked account is worse than a stale push.
-9. **Catalog changes are versioned.** Importing a new `data/badges/` build never deletes requirement rows; it creates a new catalog version, links unchanged requirements by `ahg_requirement_id`, and reports orphans (completions whose requirement vanished) for a human.
+9. **Levels.** Tenderheart and Explorer versions of a badge are distinct awards on AHGFamily and can both be earned; a Pioneer/Patriot badge is one award, earned once. A completion is applied to the girl's **current** level at the time it is confirmed (`level_at_completion`), and a push resolves the AHGFamily `le…` from that level. The tracker never back-dates a level or re-attributes an earlier completion; retroactive corrections are made directly in AHGFamily and arrive through the weekly pull.
+10. **Catalog changes are versioned.** Importing a new `data/badges/` build never deletes requirement rows; it creates a new catalog version, links unchanged requirements by `ahg_requirement_id`, and reports orphans (completions whose requirement vanished) for a human.
 
 ## 6. API surface (v1, all JSON, all under `/api/v1`, all require a leader token unless noted)
 
@@ -109,7 +111,7 @@ Errors: `{ error: "…" }` with 400/401/403/404/409. Pagination only where lists
 | Check-in roster | weekly + on demand | `GET /people`, upsert girls; flag unmatched/visitors. |
 | Attendance & proposals | 30 min after each event's `end_at`, and on `txn.*` webhooks | Pull attendance, apply rule 3. |
 | AHGFamily pull | weekly, and always immediately before a push | Grid state per active badge per girl (only badges with any activity here — not all 548). |
-| AHGFamily push | manual "Push now" at first; optional weekly once trusted | Drain the queue, read-before-write, latch on auth failure. |
+| AHGFamily push | **weekly (decided)**, plus admin "Push now" | Drain the queue, read-before-write, latch on auth failure. Each run writes a `sync_runs` row and a per-item log (girl, badge, requirement, date, result, error); the report is visible in the admin page and e-mailed/posted if configured. Ships behind the flag, off until steps 1–6 have run through a real meeting. |
 | Backup | nightly | SQLite backup to the volume. |
 
 Catalog *checking* (fetch → diff → approve) stays a monthly manual step in the `ahg-badge-tracker` repo, per your rule; the tracker only imports an approved build.
@@ -118,21 +120,21 @@ Catalog *checking* (fetch → diff → approve) stays a monthly manual step in t
 
 Badge catalog browser (with SharePoint page images inline) · Planning calendar (event → per-level plan with roles) · After-meeting confirmation (the proposals screen) · Girl progress · Badge progress ("who is missing what") · Sync/admin. All static pages calling the API with the MSAL token; no data in the site repo.
 
-## 9. Decisions I need from you
+## 9. Decisions (Bryan, Sept 7, 2026)
 
-1. **Girl ↔ AHGFamily mapping.** AHGFamily's `#youth-select` carries names with the `u…` ids, and the check-in roster carries `member_id`. Is the AHGFamily member number in the roster export the check-in app imports (so we can match automatically), or do we map by name once in an admin screen and store the result? The catalog fetch deliberately never wrote names or ids; the tracker DB on the Pi is the right place for that mapping.
-2. **Level resolution.** "Pioneer/Patriot" badges are one award id in AHGFamily, but the girl's own level decides the `le…` used in a push. Confirm `ahg_level` comes from the roster (and what values the AHG roster export actually uses), or whether a leader sets it per girl.
-3. **Who is admin?** You plus the Troop Coordinator? Admin controls credentials and pushing.
-4. **Token audience.** Validating a token issued for Microsoft Graph is the wrong thing to do; the website's app registration needs an exposed API scope for the tracker so MSAL can request a token *for it*. That's a change in the Entra app you already registered — fine to do, just noting it's not free.
-5. **Push timing.** Manual "Push now" only for the first season, or a weekly automatic push from the start?
-6. **Hostname.** `badges.<domain>` on the tunnel, or a path under the check-in hostname? Spec assumes a second hostname.
-7. **Attendance = present?** The check-in API leaves it to us: for a meeting, count a girl present if she signed in (even if the sign-out is still open after `end_at`); for campouts, require a sign-out. Agree?
+1. **Girl ↔ AHGFamily mapping** — expected to come from the roster export the check-in app already imports; confirmed via `docs/handoff-to-checkin-roster-identity.md`. Fallback: admin mapping screen.
+2. **Levels** — TH/EX badges earnable at both levels (separate awards); PiPa once, at the girl's current level; no retroactive handling in the tracker (done in AHGFamily directly).
+3. **Admins** — Bryan, the Troop Coordinator, and the leader who manages the tenant/SharePoint (`ADMIN_EMAILS`).
+4. **Token audience** — do it properly: separate app registration exposing `access_as_leader` (`docs/entra-setup.md`).
+5. **Push timing** — weekly automatic, with a full log/report of what pushed, when, and any errors.
+6. **Hostname** — `badges.<domain>`, separate from the check-in hostname.
+7. **Attended** — requires a sign-out (`open: 0`); missed sign-outs are closed by the SMS confirmation feature, so the tracker simply waits.
 
-## 10. Build order once approved
+## 10. Build order
 
 1. Skeleton + migrations + `/health` + MSAL validation (testable with a real token from the leaders area).
 2. Catalog import from `data/badges/` + `GET /badges`.
-3. Check-in client (events, people, attendance) + webhook receiver + girls/events mirror.
+3. Check-in client (events, people, attendance) + webhook receiver + girls/events mirror — needs the roster-identity answers from the check-in session.
 4. Plans and plan items API.
 5. Proposals from attendance (rule 3) + decide endpoint + progress views.
 6. AHGFamily pull (read-only) + conflicts.
