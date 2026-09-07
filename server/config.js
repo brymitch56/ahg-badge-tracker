@@ -26,6 +26,12 @@ function makeConfig(env = process.env) {
       // refused unless NODE_ENV !== 'production'.
       disabled: /^(1|true)$/i.test(env.AUTH_DISABLED || '') && env.NODE_ENV !== 'production',
     },
+    // The check-in app's Integration API (same box; read-only by contract).
+    checkin: {
+      base: (env.CHECKIN_BASE || 'http://127.0.0.1:3000').replace(/\/$/, ''),
+      apiKey: env.CHECKIN_API_KEY || '',
+      webhookSecret: env.CHECKIN_WEBHOOK_SECRET || '',
+    },
   };
 }
 
