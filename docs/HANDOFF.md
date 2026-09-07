@@ -10,16 +10,35 @@ copyright rule). Then this file, then `docs/tracker-service-spec.md` (draft 3).
 - **Pilot badges**: Nature & Wildlife, Our Flag, Toys & Games (Pioneer/Patriot)
   annotated from handbook scans (`data/handbook/`) and built (`data/badges/`).
   `scripts/check-pilot-badges.js` passes 3/3.
-- **Tracker service** (`server/`): build order steps 1–2 done — Express 5 +
+- **Tracker service** (`server/`): build order steps 1–3 done — Express 5 +
   better-sqlite3 (pinned 12.4.1 for prebuilt binaries), migrations
-  (`001-init.sql` = full spec §4 schema), `/health`, MSAL bearer validation
-  (`server/lib/auth.js`), versioned catalog import (`server/lib/catalog.js`),
-  `/api/v1/me`, `/badges`, `/badges/:id`, `/admin/catalog(/import)`,
-  `/admin/audit`. `deploy/ahg-badge-tracker.service` for the Pi.
-- **Tests**: `npm test` → 24 passing, all offline (synthetic fixtures, local
-  JWKS, in-memory SQLite).
-- **Not yet done on Bryan's PC**: `npm run migrate`, `npm run import:catalog`,
-  `npm start` + `curl /health` against the real pilot badges.
+  (`001-init.sql` = full spec §4 schema, `002-checkin.sql` = webhook dedupe +
+  girls.status), `/health`, MSAL bearer validation (`server/lib/auth.js`),
+  versioned catalog import (`server/lib/catalog.js`), `/api/v1/me`,
+  `/badges`, `/badges/:id`, `/admin/catalog(/import)`, `/admin/audit`.
+  `deploy/ahg-badge-tracker.service` for the Pi.
+- **Step 3 (check-in + mapping)**: Integration API client
+  (`server/lib/checkin.js`, read-only by construction), girls/events/
+  attendance mirror (`server/lib/mirror.js` — ical_uid+start_at identity,
+  youth only, fill-when-empty `ahg_youth_id` from `tlc_user_id`, `open`
+  mirrored verbatim; rule 4b applies at proposal time in step 5), HMAC
+  webhook receiver (`/webhooks/checkin` — raw body, 5-min window, dedupe on
+  type:txn.id, 2xx before re-polling), routes `GET /girls`,
+  `PATCH /girls/:id`, `GET /events(/: id)`, `POST /sync/checkin`,
+  `GET /sync/status`. AHGFamily mapping: `parseYouthSelectPairs`
+  (lib/parse.js; names live only in tracker.db), encrypted credential store
+  (`server/lib/credcrypto.js` + `POST /admin/ahgfamily/credentials`),
+  rule-8 auth latch, `GET/POST /admin/mapping(/refresh|/confirm)` with
+  unambiguous name-match suggestions, leader-confirmed. No in-process
+  scheduler yet — syncs run on webhooks and the admin endpoint; the §7
+  interval jobs land with step 5 when proposals give the sweep a purpose.
+- **Tests**: `npm test` → 42 passing, all offline (synthetic fixtures —
+  invented names/ids only — local JWKS, in-memory SQLite).
+- **Verified on Bryan's PC (Sept 7)**: `npm run migrate`,
+  `npm run import:catalog` (version 1: 3 badges, 32 requirements),
+  `npm start` + `/health`, `/api/v1/badges(/:id)` against the real pilot
+  badges — all clean. Mapping refresh against live AHGFamily not yet run
+  (leader's call; it performs a real login).
 - **Entra**: not yet registered. `docs/entra-setup.md` (also a PDF beside the
   repo) is the admin's guide. Until it exists, `AUTH_DISABLED=true` (dev only)
   fakes an admin.
@@ -54,14 +73,8 @@ copyright rule). Then this file, then `docs/tracker-service-spec.md` (draft 3).
   `npm run diff`, `--apply` with an interactive "yes"). Never nightly, never
   auto-apply.
 
-## Build order (spec §10) — next is step 3
+## Build order (spec §10) — next is step 4
 
-3. Check-in Integration API client (`/ping`, `/events`, `/people`,
-   `/events/:id/attendance`), HMAC webhook receiver (`/webhooks/checkin`,
-   raw body, 5-min window, dedupe on `txn.id`), girls/events/attendance
-   mirror, `#youth-select` mapping screen API (`lib/ahgfamily.js` already
-   reads that page; add a parser that returns name ↔ id pairs — this data
-   lives only in `tracker.db`).
 4. Plans API (`PUT /events/:id/plans/:levelGroup` with roles).
 5. Proposals from attendance (rule 3/4b), decide endpoint, per-girl and
    per-badge progress views, `badge_status` derivation (all / n_of).
