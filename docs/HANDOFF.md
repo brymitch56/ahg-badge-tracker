@@ -129,8 +129,13 @@ copyright rule). Then this file, then `docs/tracker-service-spec.md` (draft 3).
    post and only when rule 1 says complete, auth-failure latch, weekly
    e-mailed report. **Never** call `/advancement/delete`.
 
-Then website leaders-area pages (hub + Documents/Badges/Planning/Progress/
-Admin) against the API, and handbook scanning for the rest of the book.
+Website leaders-area pages: DONE (site repo, ahg-troop-ny2911@65b33d8) —
+leaders-badges/-planning/-progress/-admin.html + assets/tracker.js (shared
+MSAL for the tracker scope + fetch wrapper), gated behind
+config.js tracker:{ baseUrl, scope } (inert until Entra lands; dev-only
+authMode:"disabled" for local testing against AUTH_DISABLED). Smoke-tested
+in a browser against a seeded local tracker. Still ahead: handbook
+scanning for the rest of the book, and step 7 above.
 
 ## Working notes
 
