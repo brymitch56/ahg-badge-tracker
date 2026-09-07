@@ -227,8 +227,6 @@ async function run(argv) {
           ...parsed,
           source: { endpoint: 'badge-tracker-view', style: 'standard', level: 'all', youth: '<youthHashid>', fetchedAt: new Date().toISOString() },
         }, { youthIds });
-        const text = JSON.stringify(award);
-        if (P.containsYouthId(text)) award.parse.warnings.push('output may still contain a youth-id-like token — inspect before committing anything derived from it');
       } catch (e) {
         fs.mkdirSync(paths.raw, { recursive: true });
         fs.writeFileSync(path.join(paths.raw, `${meta.awardId}.html`), html, { mode: 0o600 });
@@ -247,15 +245,20 @@ async function run(argv) {
         }
         if (gridHtml) {
           if (args.keepRaw) fs.writeFileSync(path.join(paths.raw, `${meta.awardId}.grid.html`), gridHtml, { mode: 0o600 });
-          const g = P.parseGridFragment(gridHtml);
+          const g = P.parseGridFragment(gridHtml, { awardId: meta.awardId });
           award.levelId = g.levelId;
           award.source.levelIdFrom = g.levelId ? 'grid' : null;
-          if (!g.levelId) award.parse.warnings.push(`grid: no level id (${g.cells} advance-icon cells)`);
+          // the grid renders no cells for whole-award / multi-instance awards — nothing to read there
+          if (!g.levelId && !award.wholeAwardOnly) award.parse.warnings.push(`grid: no level id (${g.cells} advance-icon cells)`);
           if (g.levelIds.length > 1) award.parse.warnings.push(`grid: multiple level ids ${g.levelIds.join(',')} — used first`);
           const std = new Set(award.groups.flatMap((grp) => grp.items.flatMap((it) => (it.children ? it.children.map((c) => c.id) : [it.id]))).filter(Boolean));
           const onlyGrid = g.requirementIds.filter((id) => !std.has(id));
           const onlyStd = [...std].filter((id) => !g.requirementIds.includes(id));
-          if (onlyGrid.length || onlyStd.length) award.parse.warnings.push(`grid/standard requirement ids differ: only-grid=[${onlyGrid.join(',')}] only-standard=[${onlyStd.join(',')}]`);
+          // Ids the grid tracks but the Standard view never renders: on level
+          // awards these are the prior-edition (2016 handbook) items. Kept for
+          // reference, never plannable. Ids missing from the grid are a real problem.
+          award.gridOnlyRequirementIds = onlyGrid;
+          if (onlyStd.length) award.parse.warnings.push(`requirement ids in Standard view but not in grid: [${onlyStd.join(',')}]`);
           award = P.scrubPersonal({ ...award, _recordIds: [] }, { youthIds: [...youthIds, ...g.youthIds] });
         }
       }

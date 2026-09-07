@@ -51,17 +51,29 @@ and prints a diff.
   "wholeAwardKeyedBy": "award",
   "instructions": [],
   "groups": [
-    { "label": "Complete All", "items": [
+    { "label": "Complete All", "rule": { "type": "all" }, "edition": "current", "plannable": true, "items": [
       { "id": "<12-char requirement id>", "number": 1, "title": "…" },
       { "id": null, "number": 2, "title": "parent", "children": [
         { "id": "…", "letter": "a", "title": "…" } ] }
     ] }
   ],
   "itemCount": 11, "hasLetteredLeaves": false,
+  "gridOnlyRequirementIds": [],
   "parse": { "mode": "title-first", "warnings": [] },
   "source": { "endpoint": "badge-tracker-view", "style": "standard", "level": "all", "youth": "<youthHashid>", "fetchedAt": "…" }
 }
 ```
+
+Group labels are AHGFamily's `<h4>` text verbatim ("Complete Three",
+"History and Rules", "Together We Play (Choose One)"); `rule` is derived from
+the label when it says "Complete/Choose N|All", else `null`. Groups labelled
+with a year ("2016 Handbook") get `edition: "2016"`, `plannable: false` —
+only current-handbook requirements are ever planned. `gridOnlyRequirementIds`
+lists items the Grid view tracks but the Standard view hides (prior-edition
+items on level awards); they are never plannable.
+
+`scripts/reparse-raw.js` rebuilds award JSON from fragments saved with
+`--keep-raw`, offline — use it when tuning the parser.
 
 Awards whose AHGFamily name contains "(Retired)" are fetched (they still
 exist as records) but carry `retired: true`; nothing downstream may offer

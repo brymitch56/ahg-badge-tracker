@@ -60,6 +60,27 @@ test('fragment, whole-award-only repeatable bead: zero items, record-keyed panel
   assert.deepEqual(a._recordIds.sort(), [F.REC, F.REC2].sort());
 });
 
+test('live markup: h4 groups of any wording, aw-prefixed ids, instruction h4, rule/edition', () => {
+  const a = P.parseFragment(F.fragmentLive, { awardId: 'aw0000test07', youthId: F.YOUTH });
+  assert.equal(a.itemCount, 7, 'the aw… requirement id is not mistaken for an award id');
+  assert.equal(a.wholeAwardKeyedBy, 'award');
+  assert.deepEqual(a.instructions, ['Pioneers and Patriots may complete EITHER the Rifle section or the Shotgun section of this badge.']);
+  assert.deepEqual(a.groups.map((g) => [g.label, g.items.length, g.rule, g.edition, g.plannable]), [
+    ['Complete All (Current Handbook)', 2, { type: 'all' }, 'current', true],
+    ['Women Of The Old Testament: Complete One', 2, { type: 'n_of', n: 1 }, 'current', true],
+    ['Rifles', 1, null, 'current', true],
+    ['Complete All (2016 Handbook)', 1, { type: 'all' }, '2016', false],
+  ]);
+  assert.deepEqual(a.groups[0].items[0], { id: 'awh000test01', number: 1, title: 'Explore the history of the sport.' });
+  const rifles = a.groups[2].items[0];
+  assert.equal(rifles.title, 'Complete All');
+  assert.equal(rifles.id, null);
+  assert.deepEqual(rifles.children.map((c) => c.letter + ':' + c.title), ['a:Basic gun safety', 'b:Types of rifles']);
+  assert.deepEqual(a.parse.warnings, []);
+  const s = P.scrubPersonal(a, { youthIds: [F.YOUTH] });
+  assert.ok(!JSON.stringify(s).includes('Placeholder, Girl'), 'girl name never reaches output');
+});
+
 test('grid fragment: level id, requirement ids, youth ids for scrubbing', () => {
   const g = P.parseGridFragment(F.fragmentGrid);
   assert.equal(g.levelId, F.LEVEL);
@@ -87,7 +108,10 @@ test('scrubPersonal removes youth and record ids everywhere, keeps requirement i
 test('classify: items beat headings; chrome filtered', () => {
   assert.equal(P.classify('3. Read the handbook').type, 'numbered');
   assert.equal(P.classify('Complete Three').type, 'heading');
-  assert.equal(P.classify('Pioneer & Patriot complete all').type, 'heading');
+  assert.equal(P.classify('History and Rules', { heading: true }).type, 'heading');
+  assert.equal(P.classify('History and Rules').type, 'other');
+  assert.deepEqual(P.groupMeta('Together We Play (Choose One)'), { rule: { type: 'n_of', n: 1 }, edition: 'current', plannable: true });
+  assert.deepEqual(P.groupMeta('Application: Complete Three').rule, { type: 'n_of', n: 3 });
   assert.equal(P.classify('Earned on:').type, 'chrome');
   assert.equal(P.classify('09/07/2026').type, 'chrome');
   assert.equal(P.classify('a.').type, 'letter-marker');

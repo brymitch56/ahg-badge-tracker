@@ -58,6 +58,12 @@ Auth failures are terminal: exit immediately, never retry in a loop
 - Awards named "(Retired)" on AHGFamily can no longer be earned. The fetch
   flags them `retired: true`; the planner and tracker must never offer them
   for planning, completion, or push. Filter on the flag, not the name.
+- Only current-handbook requirements are used — never the 2016 handbook.
+  Groups with `edition` other than `current` (and `gridOnlyRequirementIds`)
+  are `plannable: false` and must be excluded everywhere downstream.
+- Requirement ids are 12 random alphanumerics with NO prefix; some start
+  with "aw", "ad", "le" or "u" by chance. Never classify an id by prefix
+  alone — compare against the known award id / roster ids.
 
 ## Housekeeping
 

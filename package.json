@@ -10,6 +10,7 @@
   "scripts": {
     "fetch:catalog": "node scripts/fetch-ahgfamily-catalog.js",
     "check:pilot": "node scripts/check-pilot-badges.js",
+    "reparse": "node scripts/reparse-raw.js",
     "test": "node --test test/parse.test.js"
   }
 }

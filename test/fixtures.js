@@ -109,4 +109,36 @@ const fragmentGrid = `<table><tr><th>Item</th><th>Placeholder Girl</th></tr>
 <tr><td>Purchased</td><td><div class="advance-icon purchased_level" data-id="p_${YOUTH}_${LEVEL}" data-yt="${YOUTH}" data-level="${LEVEL}" data-value="0"></div></td></tr>
 </table>`;
 
-module.exports = { fragmentGrid, YOUTH, REC, REC2, LEVEL, R, indexPage, fragmentTitleFirst, fragmentLettered, fragmentBead };
+// Live-markup fixture (shape observed on ahgfamily.org 2026-09-07, ids invented):
+// h4 group headings with nested markup and a progress donut inside, rows of
+// "N.&nbsp;&nbsp;&nbsp;Title", Krajee checkboxX as <input type="text">, a
+// requirement id that starts with "aw", a sentence-like h4 that is an
+// instruction, a "Rifles" section whose item "1. Complete All" has lettered
+// children, and a (2016 Handbook) group.
+function liveRow(marker, title, id) {
+  return `<div class="row" style="margin-top:5px;"><div class="col-xs-2 col-md-1"><input type="text" id="checkbox-${id}" class="cbx-loading" name="checkbox-${id}" value="0"></div>
+  <div class="col-xs-8 col-md-10">${marker}.&nbsp;&nbsp;&nbsp;${title}</div>
+  <div class="col-xs-2 col-md-1" style="margin:6px 0 0 0"><input type="text" id="date-${id}" class="form-control krajee-datepicker" name="date-${id}" value="09/07/2026"><span id="copy-${id}" class="btn">copy</span></div></div>`;
+}
+const liveHead = (inner) => `<h4 style="margin:5px 0 5px 0"><strong>${inner}</strong><span class="pull-right"><span class="percent_completed">0/100</span></span></h4>`;
+const fragmentLive = `
+<div class="panel shadow no-overflow"><div class="panel-heading"><table style="width: 100%"><tr><td><h2 class="panel-title"><strong>Some Badge</strong></h2></td></tr></table>
+<p>&nbsp;&nbsp;<strong>Placeholder, Girl</strong> Completed&nbsp;On <input type="text" id="completed_on-aw0000test07" name="completed_on-aw0000test07">
+<input type="text" name="awarded_on-aw0000test07"><input type="text" name="purchased-aw0000test07"></p>
+<span id="checkall">&nbsp;Check All</span>
+${liveHead('Pioneers and Patriots may complete EITHER the Rifle section or the Shotgun section of this badge.')}
+${liveHead('Complete All (<em>Current Handbook</em>)')}
+${liveRow(1, 'Explore the history of the sport.', 'awh000test01')}
+${liveRow(2, 'Research a famous player.', 'n0000test002')}
+${liveHead('Women Of The Old Testament: Complete One')}
+${liveRow(3, 'Sarah', 'n0000test003')}
+${liveRow(4, 'Rebekah', 'n0000test004')}
+${liveHead('Rifles')}
+<div class="row"><div class="col-md-12">1.&nbsp;&nbsp;&nbsp;Complete All<span class="pull-right"><span class="percent_completed">0/100</span></span></div></div>
+${liveRow('a', 'Basic gun safety', 'n0000test005')}
+${liveRow('b', 'Types of rifles', 'n0000test006')}
+${liveHead('Complete All (<em>2016 Handbook</em>)')}
+${liveRow(1, 'Old requirement', 'n0000test007')}
+<button>Submit Progress</button></div>`;
+
+module.exports = { fragmentLive, fragmentGrid, YOUTH, REC, REC2, LEVEL, R, indexPage, fragmentTitleFirst, fragmentLettered, fragmentBead };
