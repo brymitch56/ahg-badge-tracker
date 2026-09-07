@@ -60,7 +60,7 @@ async function pollUntilReady(cfg, jar, token, statusPath, max = 40, ms = 3000) 
 
 async function main(argv) {
   const wantLevels = argv.includes('--levels');
-  const exportPath = process.env.AHG_EXPORT_PATH || '/user/index?export=xlsx&new=0';
+  const exportPath = process.env.AHG_EXPORT_PATH || '/user/exportexcel?format=xlsx'; // AHGFamily; TLC would be /user/index?export=xlsx&new=0
   const statusPath = '/databuilder/get-download-status';
   const cfg = A.makeConfig();
   const jar = new A.CookieJar();
