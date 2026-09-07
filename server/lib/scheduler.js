@@ -9,15 +9,20 @@
  * sweep applies rule 3 (proposals) idempotently. AHGFamily pull/push jobs
  * are steps 6–7 and are NOT here.
  */
+const fs = require('fs');
+const path = require('path');
 const mirror = require('./mirror');
 const proposals = require('./proposals');
 const mapping = require('./mapping');
 const ahgpull = require('./ahgpull');
+const { getSetting, setSetting } = require('./settings');
 const { CheckinError } = require('./checkin');
 
 const EVENTS_EVERY_MS = 24 * 3600e3;      // nightly
 const PEOPLE_EVERY_MS = 7 * 24 * 3600e3;  // weekly
 const PULL_EVERY_MS = 7 * 24 * 3600e3;    // weekly (spec §7, decided)
+const BACKUP_EVERY_MS = 24 * 3600e3;      // nightly
+const BACKUPS_KEPT = 14;
 const SWEEP_DELAY_MS = 30 * 60e3;         // 30 min after end_at
 const SWEEP_WINDOW_MS = 7 * 24 * 3600e3;  // stop chasing week-old events
 
@@ -26,6 +31,24 @@ function makeScheduler({ cfg, db, client, credKey = null, ahgSessionFactory = un
     const out = {};
     const lastOk = (kind) => db.prepare('SELECT started_at FROM sync_runs WHERE kind = ? AND ok = 1 ORDER BY id DESC LIMIT 1').get(kind);
     const age = (row) => (row ? nowMs - Date.parse(row.started_at) : Infinity);
+
+    // Nightly SQLite backup (spec §7 — same pattern as the check-in app).
+    try {
+      const last = getSetting(db, 'last_backup');
+      if (db.name && db.name !== ':memory:' && (!last || nowMs - Date.parse(last) >= BACKUP_EVERY_MS)) {
+        const dir = path.join(cfg.dataDir, 'backups');
+        fs.mkdirSync(dir, { recursive: true });
+        const file = path.join(dir, `tracker-${new Date(nowMs).toISOString().slice(0, 10)}.db`);
+        await db.backup(file);
+        setSetting(db, 'last_backup', new Date(nowMs).toISOString());
+        const old = fs.readdirSync(dir).filter((f) => /^tracker-\d{4}-\d{2}-\d{2}\.db$/.test(f)).sort();
+        for (const f of old.slice(0, Math.max(0, old.length - BACKUPS_KEPT))) fs.unlinkSync(path.join(dir, f));
+        out.backup = file;
+      }
+    } catch (e) {
+      log(`[tracker] backup failed: ${e.message}`);
+      out.backupError = e.message;
+    }
 
     // Weekly AHGFamily pull (read-only; rule 8: never while latched, never
     // without credentials, and one auth failure stops everything).

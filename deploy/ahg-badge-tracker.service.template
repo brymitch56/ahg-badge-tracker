@@ -1,0 +1,28 @@
+# systemd unit for the badge tracker service — installed by
+# deploy/install-pi.sh (which fills @APP_DIR@ / @USER@), beside the
+# troop-checkin service, same pattern. Listens on 127.0.0.1:${PORT} only;
+# the Cloudflare Tunnel (badges.<domain>) fronts it later.
+[Unit]
+Description=AHG badge tracker service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@APP_DIR@
+Environment=NODE_ENV=production
+ExecStartPre=/usr/bin/node server/scripts/migrate.js
+ExecStart=/usr/bin/node server/index.js
+Restart=on-failure
+RestartSec=5
+# hardening (kept light, like the check-in unit — the service writes
+# data/ and appends the auto-generated CRED_KEY to .env on first
+# credential save, so no ProtectSystem=strict here)
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

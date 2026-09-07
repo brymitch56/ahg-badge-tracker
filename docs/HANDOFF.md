@@ -16,7 +16,6 @@ copyright rule). Then this file, then `docs/tracker-service-spec.md` (draft 3).
   girls.status), `/health`, MSAL bearer validation (`server/lib/auth.js`),
   versioned catalog import (`server/lib/catalog.js`), `/api/v1/me`,
   `/badges`, `/badges/:id`, `/admin/catalog(/import)`, `/admin/audit`.
-  `deploy/ahg-badge-tracker.service` for the Pi.
 - **Step 3 (check-in + mapping)**: Integration API client
   (`server/lib/checkin.js`, read-only by construction), girls/events/
   attendance mirror (`server/lib/mirror.js` — ical_uid+start_at identity,
@@ -58,7 +57,31 @@ copyright rule). Then this file, then `docs/tracker-service-spec.md` (draft 3).
   weekly roster, attendance sweep from end_at+30 min until a post-event
   fetch finds no open rows (`events.attendance_fetched_at`); started by
   index.js unless `DISABLE_SCHEDULER`.
-- **Tests**: `npm test` → 55 passing, all offline (synthetic fixtures —
+- **Step 6 (AHGFamily pull)**: `server/lib/ahgpull.js` + `parseGridState`/
+  `parseStandardState` (lib/parse.js). One login per run through the
+  read-only allow-list; one Grid request per *active* badge (has local
+  completions/plans/ahg_state — never all 548) covering every mapped girl,
+  plus a Standard detail request only where a checked item is missing its
+  date (earned_on/comment/ad record → `ahg_state`, tracker.db only).
+  Rule 6: complete there + unknown here → confirmed `source: ahgfamily`
+  completion; confirmed here + not there → `push_queue` mark (idle until
+  step 7); was-complete now un-checked → open conflict (migration 004),
+  resolved by a leader (`accept_ahgfamily` retracts locally /
+  `keep_tracker` re-queues); agreement skips the queued mark. Rule 8 latch
+  throughout. Endpoints: `POST /sync/pull`, `GET /sync/queue`,
+  `GET /conflicts`, `POST /conflicts/:id/resolve`; `/sync/status` reports
+  queue counts, open conflicts, AHGFamily state. Scheduler: weekly pull
+  gated on deliberately STORED credentials (the .env dev fallback never
+  auto-pulls), mapped girls, no latch; plus the nightly SQLite backup
+  (`data/backups/`, 14 kept).
+- **Deploy**: `deploy/install-pi.sh` + `deploy/ahg-badge-tracker.service.template`
+  (mirrors troop-checkin's installer; Node 20 only if missing, `npm ci`,
+  `.env` scaffold, migrate, catalog import, systemd unit).
+  `docs/pi-setup.md` is the walkthrough, including testing before Entra
+  (hand-run with `AUTH_DISABLED` on 127.0.0.1 only — the unit's
+  `NODE_ENV=production` refuses the flag) and the data/badges copy step
+  (copyrighted text, never in git).
+- **Tests**: `npm test` → 62 passing, all offline (synthetic fixtures —
   invented names/ids only — local JWKS, in-memory SQLite).
 - **Verified on Bryan's PC (Sept 7)**: `npm run migrate`,
   `npm run import:catalog` (version 1: 3 badges, 32 requirements),
@@ -99,10 +122,8 @@ copyright rule). Then this file, then `docs/tracker-service-spec.md` (draft 3).
   `npm run diff`, `--apply` with an interactive "yes"). Never nightly, never
   auto-apply.
 
-## Build order (spec §10) — next is step 6
+## Build order (spec §10) — next is step 7 (needs Bryan's explicit go)
 
-6. AHGFamily pull (grid view per active badge per girl) → `ahg_state`,
-   conflicts.
 7. Push behind the flag: read-before-write toggle, `dateSpecified` = the
    completion date, whole-badge `completed_on` only via the Standard form
    post and only when rule 1 says complete, auth-failure latch, weekly
