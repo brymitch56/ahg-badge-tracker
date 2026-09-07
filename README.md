@@ -45,6 +45,7 @@ and prints a diff.
 ```json
 {
   "awardId": "aw…", "name": "…", "imageSlug": "…", "levelGroup": "Pioneer/Patriot",
+  "retired": false,
   "levelId": "le…",
   "wholeAwardOnly": false, "multiInstance": false, "instancePanels": 0,
   "wholeAwardKeyedBy": "award",
@@ -61,6 +62,10 @@ and prints a diff.
   "source": { "endpoint": "badge-tracker-view", "style": "standard", "level": "all", "youth": "<youthHashid>", "fetchedAt": "…" }
 }
 ```
+
+Awards whose AHGFamily name contains "(Retired)" are fetched (they still
+exist as records) but carry `retired: true`; nothing downstream may offer
+them for planning or tracking.
 
 `data/` is gitignored. Raw HTML fragments (which contain the youth id used
 for the fetch) are kept under `data/ahgfamily/raw/` only on parse failure or

@@ -27,6 +27,7 @@ const indexPage = `
   <optgroup label="Pioneer/Patriot">
     <option value="aw0000test02">Nature &amp; Wildlife|nature_and_wildlife_white</option>
     <option value="aw0000test03">Our Flag|our_flag_white</option>
+    <option value="aw0000test08">Old Badge (Retired)|old_badge</option>
   </optgroup>
 </select>
 </body></html>`;

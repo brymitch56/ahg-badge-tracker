@@ -7,8 +7,9 @@ const F = require('./fixtures');
 
 test('index page: badge-select, youth-select (ids only), level-select, csrf', () => {
   const badges = P.parseBadgeSelect(F.indexPage);
-  assert.equal(badges.length, 3);
-  assert.deepEqual(badges[1], { awardId: 'aw0000test02', name: 'Nature & Wildlife', imageSlug: 'nature_and_wildlife_white', levelGroup: 'Pioneer/Patriot' });
+  assert.equal(badges.length, 4);
+  assert.deepEqual(badges[1], { awardId: 'aw0000test02', name: 'Nature & Wildlife', imageSlug: 'nature_and_wildlife_white', levelGroup: 'Pioneer/Patriot', retired: false });
+  assert.equal(badges[3].retired, true, '"(Retired)" awards are flagged');
   assert.equal(badges[0].levelGroup, 'All');
   assert.deepEqual(P.parseYouthSelect(F.indexPage), [F.YOUTH, 'u0000test002']);
   assert.deepEqual(P.parseLevelSelect(F.indexPage), [{ code: 'all', label: 'All Girls' }, { code: 'pipa', label: 'Pioneer/Patriot' }]);

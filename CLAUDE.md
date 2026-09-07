@@ -53,6 +53,12 @@ behind explicit review, never in a catalog/fetch script.
 Auth failures are terminal: exit immediately, never retry in a loop
 (AHGFamily may lock the account). Throttle every request (~300 ms).
 
+## Catalog rules
+
+- Awards named "(Retired)" on AHGFamily can no longer be earned. The fetch
+  flags them `retired: true`; the planner and tracker must never offer them
+  for planning, completion, or push. Filter on the flag, not the name.
+
 ## Housekeeping
 
 - `npm test` must pass before any push (Node's built-in runner; tests run

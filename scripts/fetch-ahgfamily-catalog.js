@@ -105,7 +105,7 @@ function printSummary({ catalog, fetchedNow, failures, awardsDir }) {
   const warned = loaded.filter((a) => a.parse && a.parse.warnings.length);
 
   console.log('\n=== AHGFamily catalog summary ===');
-  console.log(`awards in #badge-select:        ${catalog.length}`);
+  console.log(`awards in #badge-select:        ${catalog.length}  (${catalog.filter((a) => a.retired).length} marked "(Retired)" — flagged retired:true, never plannable)`);
   console.log(`awards fetched this run:        ${fetchedNow}`);
   console.log(`awards with JSON on disk:       ${loaded.length}`);
   console.log(`awards with zero items:         ${zero.length}`);
@@ -119,15 +119,15 @@ function printSummary({ catalog, fetchedNow, failures, awardsDir }) {
   const groups = new Map();
   for (const a of loaded) {
     const g = a.levelGroup || '(none)';
-    if (!groups.has(g)) groups.set(g, { awards: 0, items: 0, zero: 0, min: Infinity, max: 0 });
+    if (!groups.has(g)) groups.set(g, { awards: 0, items: 0, zero: 0, retired: 0, min: Infinity, max: 0 });
     const s = groups.get(g);
-    s.awards++; s.items += a.itemCount; if (a.itemCount === 0) s.zero++;
+    s.awards++; s.items += a.itemCount; if (a.itemCount === 0) s.zero++; if (a.retired) s.retired++;
     s.min = Math.min(s.min, a.itemCount); s.max = Math.max(s.max, a.itemCount);
   }
   console.log('\nitems per level group:');
-  console.log(`  ${pad('level group', 22)} ${pad('awards', 7, true)} ${pad('items', 7, true)} ${pad('avg', 6, true)} ${pad('min', 4, true)} ${pad('max', 4, true)} ${pad('zero', 5, true)}`);
+  console.log(`  ${pad('level group', 22)} ${pad('awards', 7, true)} ${pad('items', 7, true)} ${pad('avg', 6, true)} ${pad('min', 4, true)} ${pad('max', 4, true)} ${pad('zero', 5, true)} ${pad('retired', 8, true)}`);
   for (const [g, s] of [...groups].sort((x, y) => x[0].localeCompare(y[0]))) {
-    console.log(`  ${pad(g, 22)} ${pad(s.awards, 7, true)} ${pad(s.items, 7, true)} ${pad((s.items / s.awards).toFixed(1), 6, true)} ${pad(s.min === Infinity ? 0 : s.min, 4, true)} ${pad(s.max, 4, true)} ${pad(s.zero, 5, true)}`);
+    console.log(`  ${pad(g, 22)} ${pad(s.awards, 7, true)} ${pad(s.items, 7, true)} ${pad((s.items / s.awards).toFixed(1), 6, true)} ${pad(s.min === Infinity ? 0 : s.min, 4, true)} ${pad(s.max, 4, true)} ${pad(s.zero, 5, true)} ${pad(s.retired, 8, true)}`);
   }
 
   if (warned.length) {
@@ -223,6 +223,7 @@ async function run(argv) {
           name: meta.name,
           imageSlug: meta.imageSlug,
           levelGroup: meta.levelGroup,
+          retired: meta.retired,
           ...parsed,
           source: { endpoint: 'badge-tracker-view', style: 'standard', level: 'all', youth: '<youthHashid>', fetchedAt: new Date().toISOString() },
         }, { youthIds });
@@ -271,10 +272,18 @@ async function run(argv) {
   const oldFailures = (prevIndex.failures || []).filter((f) => !onDisk.has(f.awardId) && !failures.some((x) => x.awardId === f.awardId));
   const allFailures = [...oldFailures, ...failures];
   const levelIdsByGroup = {};
+  let backfilled = 0;
   for (const id of onDisk) {
-    const j = readJson(path.join(paths.awards, `${id}.json`));
+    const p = path.join(paths.awards, `${id}.json`);
+    const j = readJson(p);
+    if (j && typeof j.retired !== 'boolean') { // files written before the flag existed
+      const rebuilt = { awardId: j.awardId, name: j.name, imageSlug: j.imageSlug, levelGroup: j.levelGroup, retired: P.isRetired(j.name) };
+      for (const [k, v] of Object.entries(j)) if (!(k in rebuilt)) rebuilt[k] = v;
+      writeJson(p, rebuilt); backfilled++;
+    }
     if (j && j.levelId) { levelIdsByGroup[j.levelGroup] = levelIdsByGroup[j.levelGroup] || new Set(); levelIdsByGroup[j.levelGroup].add(j.levelId); }
   }
+  if (backfilled) console.log(`[catalog] backfilled the retired flag on ${backfilled} existing award file(s)`);
   writeJson(paths.index, {
     generatedAt: new Date().toISOString(),
     source: { site: cfg.base, page: '/advancement/index?level=all&style=grid' },
