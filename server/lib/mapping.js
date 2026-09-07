@@ -61,6 +61,14 @@ const credentialsState = (db, key = null, env = process.env) => {
   return !c ? 'off' : c.unreadable ? 'unreadable' : 'ok';
 };
 
+// The SCHEDULED weekly pull runs only on credentials an admin deliberately
+// stored through the UI — never on the .env dev fallback (which exists for
+// the fetch scripts and on-demand admin calls).
+const hasStoredCredentials = (db, key = null, env = process.env) => {
+  const stored = getSetting(db, CREDS_KEY);
+  return Boolean(stored && cred.decrypt(stored.box, key || cred.loadKey(env)) != null);
+};
+
 // -------------------------------------------------- youth-select refresh ----
 /**
  * Production fetcher: sign in, GET the advancement page shell, sign out.
@@ -179,7 +187,7 @@ function confirmMappings(db, pairs, actor) {
 module.exports = {
   CREDS_KEY, LATCH_KEY, YOUTH_SELECT_KEY,
   getLatch, setLatch, clearLatch,
-  storeCredentials, getCredentials, credentialsState,
+  storeCredentials, getCredentials, credentialsState, hasStoredCredentials,
   fetchAdvancementIndexHtml, refreshYouthSelect,
   normName, mappingView, confirmMappings,
 };

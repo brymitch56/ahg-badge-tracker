@@ -12,11 +12,12 @@ const mapping = require('./lib/mapping');
 const credcrypto = require('./lib/credcrypto');
 const plans = require('./lib/plans');
 const proposals = require('./lib/proposals');
+const ahgpull = require('./lib/ahgpull');
 
 let VERSION = null;
 try { VERSION = require(path.join(__dirname, '..', 'package.json')).version; } catch { /* stripped install */ }
 
-function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefined, ahgFetchHtml = undefined }) {
+function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefined, ahgFetchHtml = undefined, ahgSessionFactory = undefined }) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 1); // Cloudflare tunnel in front
@@ -235,9 +236,50 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
       .map((r) => db.prepare('SELECT * FROM sync_runs WHERE id = ?').get(r.id));
     res.json({
       checkinConfigured: checkin.configured,
+      ahgfamily: mapping.getLatch(db) ? 'latched' : mapping.credentialsState(db, credKey()),
       runs: lastByKind.map((r) => ({ kind: r.kind, startedAt: r.started_at, finishedAt: r.finished_at, ok: r.ok === null ? null : !!r.ok, summary: r.summary ? JSON.parse(r.summary) : null, error: r.error })),
       webhookDeliveries: db.prepare('SELECT COUNT(*) AS n FROM webhook_txns').get().n,
+      queue: Object.fromEntries(db.prepare('SELECT status, COUNT(*) AS n FROM push_queue GROUP BY status').all().map((r) => [r.status, r.n])),
+      openConflicts: db.prepare("SELECT COUNT(*) AS n FROM conflicts WHERE status = 'open'").get().n,
     });
+  });
+
+  // ------------------------------------------ AHGFamily pull & conflicts --
+  const pullErr = (res, e, db_) => {
+    const status = e.code === 'latched' ? 409 : e.code === 'conflict' ? 409 : e.code === 'noconfig' || e.code === 'bad' ? 400 : e.code === 'notfound' ? 404 : 502;
+    return res.status(status).json({ error: e.message, latched: !!mapping.getLatch(db_) });
+  };
+  api.post('/sync/pull', admin, async (req, res) => {
+    try {
+      res.json(await ahgpull.pullAhgState(db, cfg, {
+        ...(ahgSessionFactory ? { sessionFactory: ahgSessionFactory } : {}), key: credKey(), actor: req.user.email,
+      }));
+    } catch (e) {
+      if (e instanceof ahgpull.PullError) return pullErr(res, e, db);
+      console.error('[tracker] pull failed:', e);
+      return res.status(502).json({ error: 'pull failed', detail: e.message });
+    }
+    return undefined;
+  });
+  api.get('/sync/queue', leader, (req, res) => {
+    const rows = db.prepare(`SELECT q.*, g.first_name, g.last_name, b.name AS badge_name, r.number, r.letter, r.title
+                             FROM push_queue q JOIN girls g ON g.id = q.girl_id
+                             LEFT JOIN badges b ON b.id = q.badge_id LEFT JOIN requirements r ON r.id = q.requirement_id
+                             ORDER BY q.id DESC LIMIT 500`).all();
+    res.json(rows.map((q) => ({
+      id: q.id, status: q.status, action: q.action, date: q.date, girlId: q.girl_id, firstName: q.first_name, lastName: q.last_name,
+      badgeId: q.badge_id, badgeName: q.badge_name, requirementId: q.requirement_id, number: q.number, letter: q.letter, title: q.title,
+      attempts: q.attempts, lastError: q.last_error, createdAt: q.created_at, sentAt: q.sent_at,
+    })));
+  });
+  api.get('/conflicts', leader, (req, res) => res.json(ahgpull.listConflicts(db, { all: req.query.all === '1' })));
+  api.post('/conflicts/:id/resolve', leader, (req, res) => {
+    try {
+      return res.json(ahgpull.resolveConflict(db, Number(req.params.id), req.body || {}, req.user.email));
+    } catch (e) {
+      if (e instanceof ahgpull.PullError) return pullErr(res, e, db);
+      throw e;
+    }
   });
 
   // ------------------------------------- AHGFamily mapping & credentials --

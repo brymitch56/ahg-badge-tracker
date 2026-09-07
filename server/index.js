@@ -18,14 +18,18 @@ const server = app.listen(cfg.port, '127.0.0.1', () => {
   console.log(`[tracker] listening on http://127.0.0.1:${cfg.port} (db: ${cfg.dbPath})`);
 });
 
-// Background jobs (spec §7): event/roster syncs and the attendance sweep.
-const scheduler = makeScheduler({ cfg, db, client: makeCheckinClient(cfg.checkin) });
+// Background jobs (spec §7): event/roster syncs, the attendance sweep, and
+// the weekly read-only AHGFamily pull (runs only once credentials are
+// stored and girls are mapped; a latch stops it entirely).
+const scheduler = makeScheduler({
+  cfg, db, client: makeCheckinClient(cfg.checkin),
+  credKey: cfg.credKeyHex ? Buffer.from(cfg.credKeyHex, 'hex') : null,
+});
 if (/^(1|true)$/i.test(process.env.DISABLE_SCHEDULER || '')) {
   console.log('[tracker] scheduler disabled (DISABLE_SCHEDULER)');
-} else if (cfg.checkin.apiKey) {
-  scheduler.start();
 } else {
-  console.warn('[tracker] CHECKIN_API_KEY not set — check-in syncs will not run.');
+  if (!cfg.checkin.apiKey) console.warn('[tracker] CHECKIN_API_KEY not set — check-in syncs will not run.');
+  scheduler.start();
 }
 
 const shutdown = (sig) => {

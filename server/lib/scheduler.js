@@ -11,19 +11,36 @@
  */
 const mirror = require('./mirror');
 const proposals = require('./proposals');
+const mapping = require('./mapping');
+const ahgpull = require('./ahgpull');
 const { CheckinError } = require('./checkin');
 
 const EVENTS_EVERY_MS = 24 * 3600e3;      // nightly
 const PEOPLE_EVERY_MS = 7 * 24 * 3600e3;  // weekly
+const PULL_EVERY_MS = 7 * 24 * 3600e3;    // weekly (spec §7, decided)
 const SWEEP_DELAY_MS = 30 * 60e3;         // 30 min after end_at
 const SWEEP_WINDOW_MS = 7 * 24 * 3600e3;  // stop chasing week-old events
 
-function makeScheduler({ cfg, db, client, log = (m) => console.log(m) }) {
+function makeScheduler({ cfg, db, client, credKey = null, ahgSessionFactory = undefined, log = (m) => console.log(m) }) {
   async function tick(nowMs = Date.now()) {
-    if (!client.configured) return { skipped: 'checkin unconfigured' };
     const out = {};
     const lastOk = (kind) => db.prepare('SELECT started_at FROM sync_runs WHERE kind = ? AND ok = 1 ORDER BY id DESC LIMIT 1').get(kind);
     const age = (row) => (row ? nowMs - Date.parse(row.started_at) : Infinity);
+
+    // Weekly AHGFamily pull (read-only; rule 8: never while latched, never
+    // without credentials, and one auth failure stops everything).
+    const lastPull = db.prepare(`SELECT started_at FROM sync_runs WHERE kind = 'pull' AND ok = 1 AND summary LIKE '%"kind":"ahg_state"%' ORDER BY id DESC LIMIT 1`).get();
+    if (age(lastPull) >= PULL_EVERY_MS && !mapping.getLatch(db) && mapping.hasStoredCredentials(db, credKey)
+        && db.prepare('SELECT 1 FROM girls WHERE active = 1 AND ahg_youth_id IS NOT NULL LIMIT 1').get()) {
+      try {
+        out.pull = await ahgpull.pullAhgState(db, cfg, { ...(ahgSessionFactory ? { sessionFactory: ahgSessionFactory } : {}), key: credKey });
+      } catch (e) {
+        log(`[tracker] weekly AHGFamily pull failed: ${e.message}`);
+        out.pullError = e.message;
+      }
+    }
+
+    if (!client.configured) return Object.keys(out).length ? out : { skipped: 'checkin unconfigured' };
     try {
       if (age(lastOk('checkin_events')) >= EVENTS_EVERY_MS) out.events = await mirror.syncEvents(db, client);
       if (age(lastOk('checkin_people')) >= PEOPLE_EVERY_MS) out.people = await mirror.syncPeople(db, client);
