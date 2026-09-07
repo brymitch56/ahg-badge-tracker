@@ -1,0 +1,15 @@
+{
+  "name": "ahg-badge-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Leaders-only badge requirement tracker for an American Heritage Girls troop — AHGFamily catalog fetch tooling (phase 1).",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "fetch:catalog": "node scripts/fetch-ahgfamily-catalog.js",
+    "check:pilot": "node scripts/check-pilot-badges.js",
+    "test": "node --test test/parse.test.js"
+  }
+}

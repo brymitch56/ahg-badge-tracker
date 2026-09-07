@@ -1,0 +1,23 @@
+# --- secrets: never commit ---
+.env
+.env.*
+!.env.example
+
+# --- fetched data: raw HTML may contain youth ids / names; JSON is generated ---
+data/
+*.html
+*.db
+*.db-wal
+*.db-shm
+*.xlsx
+*.xls
+*.csv
+
+# dependencies & build
+node_modules/
+npm-debug.log*
+
+# editor/OS noise
+.DS_Store
+Thumbs.db
+*.swp
