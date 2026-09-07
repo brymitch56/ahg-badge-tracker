@@ -32,7 +32,17 @@ copyright rule). Then this file, then `docs/tracker-service-spec.md` (draft 3).
   unambiguous name-match suggestions, leader-confirmed. No in-process
   scheduler yet — syncs run on webhooks and the admin endpoint; the §7
   interval jobs land with step 5 when proposals give the sweep a purpose.
-- **Tests**: `npm test` → 42 passing, all offline (synthetic fixtures —
+- **Step 4 (plans)**: `server/lib/plans.js` + `GET /events/:id/plans`,
+  `PUT /events/:id/plans/:levelGroup` (URL-encode `Pioneer%2FPatriot`).
+  Plan level groups are the three badge-working units (Tenderheart,
+  Explorer, Pioneer/Patriot); a badge fits a plan when its catalog group
+  matches, is `All`, or is `Pioneer`/`Patriot` inside a PiPa plan —
+  Pathfinders never plan badgework. Replaces are diff-based so a kept
+  requirement keeps its `plan_item` id (participation/completions reference
+  it); removing an item with a live completion is a 409, rejected
+  completions release the item but keep their history, participation
+  cascades. Empty PUT deletes the plan. Everything audited.
+- **Tests**: `npm test` → 47 passing, all offline (synthetic fixtures —
   invented names/ids only — local JWKS, in-memory SQLite).
 - **Verified on Bryan's PC (Sept 7)**: `npm run migrate`,
   `npm run import:catalog` (version 1: 3 badges, 32 requirements),
@@ -73,9 +83,8 @@ copyright rule). Then this file, then `docs/tracker-service-spec.md` (draft 3).
   `npm run diff`, `--apply` with an interactive "yes"). Never nightly, never
   auto-apply.
 
-## Build order (spec §10) — next is step 4
+## Build order (spec §10) — next is step 5
 
-4. Plans API (`PUT /events/:id/plans/:levelGroup` with roles).
 5. Proposals from attendance (rule 3/4b), decide endpoint, per-girl and
    per-badge progress views, `badge_status` derivation (all / n_of).
 6. AHGFamily pull (grid view per active badge per girl) → `ahg_state`,

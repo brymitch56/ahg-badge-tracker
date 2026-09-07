@@ -10,6 +10,7 @@ const mirror = require('./lib/mirror');
 const { verifySignature, markDelivery } = require('./lib/webhook');
 const mapping = require('./lib/mapping');
 const credcrypto = require('./lib/credcrypto');
+const plans = require('./lib/plans');
 
 let VERSION = null;
 try { VERSION = require(path.join(__dirname, '..', 'package.json')).version; } catch { /* stripped install */ }
@@ -165,6 +166,22 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
       })),
     });
   });
+
+  // -------------------------------------------------------------- planning --
+  const withEvent = (req, res, fn) => {
+    const e = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
+    if (!e) return res.status(404).json({ error: 'not found' });
+    return fn(e);
+  };
+  api.get('/events/:id/plans', leader, (req, res) => withEvent(req, res, (e) => res.json(plans.getPlans(db, e.id))));
+  api.put('/events/:id/plans/:levelGroup', leader, (req, res) => withEvent(req, res, (e) => {
+    try {
+      return res.json(plans.putPlan(db, e, req.params.levelGroup, req.body, req.user.email));
+    } catch (err) {
+      if (err instanceof plans.PlanError) return res.status(err.status).json({ error: err.message });
+      throw err;
+    }
+  }));
 
   // ------------------------------------------------------------------ sync --
   api.post('/sync/checkin', admin, async (req, res) => {
