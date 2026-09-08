@@ -24,6 +24,22 @@ are public, so:
 AHGFamily's short titles and requirement ids are program metadata, not
 book text, and stay in the public catalog.
 
+## Start from the catalog (recommended)
+
+Don't hand-write the structure — generate it:
+
+```sh
+npm run scaffold:annotation -- --list Explorer     # what is left to do
+npm run scaffold:annotation -- "Our Flag" --level Explorer
+```
+
+That writes `data/handbook/<slug>.<level>.json` with every group, rule,
+requirement number and AHGFamily short title already in place (as
+`_catalogTitle` hints) and the prose fields blank. Fill in the text, then
+`npm run build:badges`. Because the numbering comes from the catalog, the
+usual build refusals (wrong counts, wrong rules, drifted numbering) can't
+happen — the only errors left are the ones you can fix by typing.
+
 ## Annotation file
 
 One file per badge per level group, named `<badge-slug>.<level>.json`

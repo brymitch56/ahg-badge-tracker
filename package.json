@@ -17,7 +17,8 @@
     "start": "node server/index.js",
     "migrate": "node server/scripts/migrate.js",
     "import:catalog": "node server/scripts/import-catalog.js",
-    "build:badges": "node scripts/build-badges.js"
+    "build:badges": "node scripts/build-badges.js",
+    "scaffold:annotation": "node scripts/scaffold-annotation.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.4.1",
