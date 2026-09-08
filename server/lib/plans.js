@@ -162,4 +162,65 @@ function audit(db, actor, event, levelGroup, before, after, at) {
       before ? JSON.stringify(before) : null, after ? JSON.stringify(after) : null);
 }
 
-module.exports = { PLAN_LEVEL_GROUPS, ROLES, badgeAllowedInPlan, PlanError, getPlans, putPlan };
+/**
+ * Program-year overview: per unit, every badge with plan items on events in
+ * [from, to], with plan-based coverage numbers. A requirement is "planned"
+ * when a completing item (role session|finish) is on the calendar, and
+ * "done" when that item's event has passed — deliberately plan-based, not
+ * completion-based (decision: the year bar tracks the schedule). "needed"
+ * honors the badge's rules: every requirement of an `all` group, rule_n of
+ * an `n_of` group — so planning 3 of a complete-three group fills its share.
+ * start/continue-only requirements are counted separately (nothing
+ * completes there yet).
+ */
+function yearOverview(db, { from, to }) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from || '') || !/^\d{4}-\d{2}-\d{2}$/.test(to || '')) {
+    throw new PlanError(400, 'from and to must be YYYY-MM-DD');
+  }
+  const rows = db.prepare(`
+    SELECT pl.level_group AS unit, pi.requirement_id, pi.role, e.start_at, e.end_at,
+           r.group_id, r.badge_id
+    FROM plan_items pi
+    JOIN plans pl ON pl.id = pi.plan_id
+    JOIN events e ON e.id = pl.event_id
+    JOIN requirements r ON r.id = pi.requirement_id
+    WHERE e.start_at >= ? AND e.start_at <= ?`).all(from, `${to}T￿`);
+  const nowIso = new Date().toISOString();
+  const units = new Map(); // unit → badgeId → groupId → reqId → state
+  for (const row of rows) {
+    const badges = units.get(row.unit) || units.set(row.unit, new Map()).get(row.unit);
+    const groups = badges.get(row.badge_id) || badges.set(row.badge_id, new Map()).get(row.badge_id);
+    const reqs = groups.get(row.group_id) || groups.set(row.group_id, new Map()).get(row.group_id);
+    const st = reqs.get(row.requirement_id) || reqs.set(row.requirement_id, { completing: false, completingPast: false }).get(row.requirement_id);
+    if (row.role === 'session' || row.role === 'finish') {
+      st.completing = true;
+      if ((row.end_at || row.start_at) <= nowIso) st.completingPast = true;
+    }
+  }
+  const out = [];
+  for (const [unit, badges] of units) {
+    const list = [];
+    for (const [badgeId, groups] of badges) {
+      const b = db.prepare('SELECT id, name, level_group, frontier FROM badges WHERE id = ?').get(badgeId);
+      let needed = 0; let planned = 0; let done = 0; let startedOnly = 0;
+      for (const gr of db.prepare('SELECT * FROM badge_groups WHERE badge_id = ? ORDER BY position').all(badgeId)) {
+        const activeCount = db.prepare('SELECT COUNT(*) AS n FROM requirements WHERE group_id = ? AND active = 1').get(gr.id).n;
+        const need = gr.rule_type === 'n_of' ? Math.min(gr.rule_n || activeCount, activeCount) : activeCount;
+        needed += need;
+        let pl = 0; let dn = 0;
+        for (const st of (groups.get(gr.id) || new Map()).values()) {
+          if (st.completing) { pl += 1; if (st.completingPast) dn += 1; } else startedOnly += 1;
+        }
+        planned += Math.min(pl, need);
+        done += Math.min(dn, need);
+      }
+      list.push({ badgeId, name: b.name, levelGroup: b.level_group, frontier: b.frontier, needed, planned, done, startedOnly });
+    }
+    list.sort((a, b) => a.name.localeCompare(b.name));
+    out.push({ unit, badges: list });
+  }
+  out.sort((a, b) => PLAN_LEVEL_GROUPS.indexOf(a.unit) - PLAN_LEVEL_GROUPS.indexOf(b.unit));
+  return { from, to, units: out };
+}
+
+module.exports = { PLAN_LEVEL_GROUPS, ROLES, badgeAllowedInPlan, PlanError, getPlans, putPlan, yearOverview };

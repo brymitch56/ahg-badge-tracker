@@ -170,3 +170,35 @@ test('empty PUT deletes the plan; audit trail records put and delete', async () 
   assert.equal(del.entity_id, `${eventId}:Explorer`);
   assert.ok(JSON.parse(del.before).items.length, 'before captured the dropped items');
 });
+
+test('year overview: plan-based bars — needed honors n_of, done = completing items on past events', async () => {
+  const t = await token({ groups: [GROUP], preferred_username: 'leader@example.com' });
+  // fresh events: one last week (held), one next week (scheduled)
+  const past = new Date(Date.now() - 7 * 864e5).toISOString();
+  const future = new Date(Date.now() + 7 * 864e5).toISOString();
+  const evPast = Number(db.prepare("INSERT INTO events (checkin_event_id, ical_uid, start_at, end_at, title, updated_at) VALUES (91, 'uid-yr-past@example.com', ?, ?, 'Held Meeting', ?)").run(past, past, past).lastInsertRowid);
+  const evFuture = Number(db.prepare("INSERT INTO events (checkin_event_id, ical_uid, start_at, end_at, title, updated_at) VALUES (92, 'uid-yr-future@example.com', ?, ?, 'Coming Meeting', ?)").run(future, future, future).lastInsertRowid);
+  // held: req 1 done that night, req 3 (n_of group) done, req 2 only STARTED
+  await put(`/api/v1/events/${evPast}/plans/${encodeURIComponent('Pioneer/Patriot')}`, t, { items: [
+    { requirementId: 'example-badge-pipa:1', role: 'session' },
+    { requirementId: 'example-badge-pipa:3', role: 'session' },
+    { requirementId: 'example-badge-pipa:2', role: 'start' },
+  ] });
+  // coming: req 2 finishes, req 4 (n_of group — beyond the rule's 1) scheduled
+  await put(`/api/v1/events/${evFuture}/plans/${encodeURIComponent('Pioneer/Patriot')}`, t, { items: [
+    { requirementId: 'example-badge-pipa:2', role: 'finish' },
+    { requirementId: 'example-badge-pipa:4', role: 'session' },
+  ] });
+  const from = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+  const to = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10);
+  const y = await (await get(`/api/v1/progress/year?from=${from}&to=${to}`, t)).json();
+  const unit = y.units.find((u) => u.unit === 'Pioneer/Patriot');
+  const b = unit.badges.find((x) => x.badgeId === 'example-badge-pipa');
+  // needed = all-group 2 + n_of(1) = 3; planned: 1,2 (all group) + n_of capped at 1 (3&4 both planned) = 3
+  // done: req1 (past session) + req3 (past, counts within n_of cap) = 2; req2's finish is in the future
+  assert.deepEqual(
+    { needed: b.needed, planned: b.planned, done: b.done, startedOnly: b.startedOnly },
+    { needed: 3, planned: 3, done: 2, startedOnly: 0 },
+  );
+  assert.equal((await get('/api/v1/progress/year?from=bad&to=2027-01-01', t)).status, 400);
+});

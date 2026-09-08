@@ -211,6 +211,14 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
     } catch (err) { return completionErr(res, err); }
   });
 
+  api.get('/progress/year', leader, (req, res) => {
+    try {
+      return res.json(plans.yearOverview(db, { from: req.query.from, to: req.query.to }));
+    } catch (err) {
+      if (err instanceof plans.PlanError) return res.status(err.status).json({ error: err.message });
+      throw err;
+    }
+  });
   api.get('/girls/:id/progress', leader, (req, res) => {
     const g = db.prepare('SELECT * FROM girls WHERE id = ?').get(req.params.id);
     if (!g) return res.status(404).json({ error: 'not found' });
