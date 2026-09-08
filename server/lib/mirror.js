@@ -60,11 +60,17 @@ function upsertEvent(db, ev) {
   return { id: r.lastInsertRowid, created: true };
 }
 
-/** Pull the event window (spec §7: today−7 … today+90) and upsert. */
+/**
+ * Pull the event window and upsert. Wider than spec §7's −7…+90 (decided
+ * Sept 2026): the planner browses far-future events (campouts months out),
+ * so the mirror pulls a year ahead and a month back; the check-in API caps
+ * one answer at 500 rows, far above a troop year. Past events already
+ * mirrored are never deleted, so history accumulates from install day.
+ */
 async function syncEvents(db, client, { from, to } = {}) {
   const today = new Date();
-  from = from || isoDate(new Date(today.getTime() - 7 * 86400e3));
-  to = to || isoDate(new Date(today.getTime() + 90 * 86400e3));
+  from = from || isoDate(new Date(today.getTime() - 30 * 86400e3));
+  to = to || isoDate(new Date(today.getTime() + 365 * 86400e3));
   return recordRun(db, 'checkin_events', async () => {
     const rows = await client.events({ from, to });
     let created = 0;
