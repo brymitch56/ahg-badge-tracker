@@ -1,0 +1,37 @@
+{
+  "_source": "Girl Handbook Badge Index (Pioneer/Patriot ed. p.336; Tenderheart/Explorer ed. p.320). Badge-name → Frontier is AHG program structure (like the catalog's short titles), not handbook prose — committable. The TH/EX book names two badges by age variant: Birds = Ornithology, Insects = Entomology. Names are matched loosely (case, &/and, punctuation); the annotation's own frontier field, when set, wins over this index.",
+  "Heritage": [
+    "Ancestor Detector", "Caring for Creation", "Citizenship & Government", "Dawn of Our Country",
+    "Freedom Seekers", "Living in the USA", "Native American", "Our Constitution", "Our Flag",
+    "Our Heritage", "U.S. Military Heroes", "Women of Faith", "World Heritage"
+  ],
+  "Family Living": [
+    "Auto Care & Safety", "Cake Decorating", "Cooking", "Family Helper", "Home Care & Repair",
+    "Home Decorating", "Kid Care", "Money Management", "Pet Care", "Scrapbooking", "Sewing",
+    "Sustainable Living", "Together as A Family", "Toys & Games"
+  ],
+  "Arts": [
+    "Art History", "Cinematography", "Crafts", "Creative Writing", "Dance", "Fine Arts",
+    "Graphic Design", "Music Appreciation", "Music Performance", "Needle Arts", "Pen & Paper Arts",
+    "Photography", "Puppetry", "Textile Arts", "Theater"
+  ],
+  "Outdoor Skills": [
+    "Archery", "Boating", "Camping", "Canoeing", "Cycling", "Fire Safety & Fire Building",
+    "Fishing", "Geocaching & Orienteering", "Hiking", "Horsemanship", "Nature & Wildlife",
+    "Outdoor Cooking", "Outdoor Skills", "Rock Climbing", "Shooting Sports",
+    "Survival, Search, & Rescue", "Swimming"
+  ],
+  "Personal Well-Being": [
+    "All God's Children", "Bible Basics", "Biblical Leadership", "Book Adventurer",
+    "Daughter of the King", "Emergency Preparedness", "Entrepreneurship", "Fashion", "Identity",
+    "Mission Minded", "Personal Care", "Physical Fitness", "Public Speaking", "Sign Language",
+    "Social Skills & Etiquette", "Travel", "World Languages"
+  ],
+  "Science & Technology": [
+    "Architecture", "Astronomy", "Aviation", "Biomimicry", "Birds", "Ornithology",
+    "Communication Technology", "Digital Citizenship", "Engineering", "Entomology", "Insects",
+    "Fresh Water & Marine Biology", "Geology", "Horticulture", "Internet Adventurer", "Internet Adventure",
+    "Kitchen Scientist", "Living & Working in Space", "Mathematics", "Medical", "Meteorology",
+    "Robotics", "Women Inventors", "Zoology"
+  ]
+}

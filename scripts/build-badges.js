@@ -34,6 +34,31 @@ function normalizeFrontier(v) {
   const hit = FRONTIERS.find((f) => f.toLowerCase().replace(/&/g, 'and').replace(/[^a-z]+/g, ' ').trim() === t);
   return hit ? { value: hit } : { error: `unknown frontier "${v}" — one of: ${FRONTIERS.join(' | ')}` };
 }
+// handbook/frontiers.json: badge name → frontier, from the printed Badge
+// Index. Used when the annotation doesn't set frontier itself.
+const NAME_TO_FRONTIER = (() => {
+  const map = new Map();
+  try {
+    const idx = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'handbook', 'frontiers.json'), 'utf8'));
+    for (const [frontier, names] of Object.entries(idx)) {
+      if (frontier.startsWith('_')) continue;
+      for (const name of names) map.set(normBadgeName(name), frontier);
+    }
+  } catch { /* index absent — annotations carry frontier themselves */ }
+  return map;
+})();
+// Spaceless compare absorbs the catalog's drift from the printed index
+// ("Freshwater & Marinebiology", "US Military Heroes"); a trailing version
+// marker ("Canoeing V1-3", "Outdoor Cooking V4") is AHGFamily bookkeeping,
+// not part of the badge's name.
+function normBadgeName(s) {
+  return String(s).toLowerCase()
+    .replace(/\s*v\d+(\s*-\s*\d+)?\s*$/, '')
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]+/g, '');
+}
+function frontierForName(name) { return NAME_TO_FRONTIER.get(normBadgeName(name)) || null; }
+
 const ruleSig = (r) => (!r ? null : r.type === 'all' ? 'all' : `n_of:${r.n}`);
 
 /** Flatten a catalog award to number-keyed leaves (parents with children expand to "2a"). */
@@ -100,7 +125,7 @@ function buildBadge(ann, award, { fetchedAt = null, annotationFile = null } = {}
     badge: {
       id: ann.slug.replace(/\./g, '-'),
       awardId: award.awardId, name: award.name, levelGroup: award.levelGroup, levels: ann.levels,
-      imageSlug: award.imageSlug || null, classic: !!ann.classic, frontier: frontier.value,
+      imageSlug: award.imageSlug || null, classic: !!ann.classic, frontier: frontier.value || frontierForName(award.name),
       handbook: { edition: 'current', pages: [], images: [], ...(ann.handbook || {}) },
       intro: ann.intro || null, ahgHistory: ann.ahgHistory || null, faithConnection: ann.faithConnection || null,
       groups, requirementCount: creqs.length,
@@ -148,4 +173,4 @@ function main(argv) {
 }
 
 if (require.main === module) main(process.argv.slice(2));
-module.exports = { FRONTIERS, normalizeFrontier, buildBadge, catalogRequirements };
+module.exports = { FRONTIERS, normalizeFrontier, frontierForName, buildBadge, catalogRequirements };

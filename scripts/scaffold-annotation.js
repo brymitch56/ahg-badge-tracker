@@ -28,6 +28,7 @@
 const fs = require('fs');
 const path = require('path');
 const { makePaths } = require('./fetch-ahgfamily-catalog');
+const { frontierForName } = require('./build-badges');
 
 // Level group → file-name code + the handbook levels the page covers.
 const LEVELS = {
@@ -69,7 +70,9 @@ function scaffold(award) {
     slug: `${slugify(award.name)}.${lv.code}`,
     levels: lv.levels,
     classic: false,
-    frontier: '', // the handbook chapter: Heritage | Family Living | Arts | Outdoor Skills | Personal Well-Being | Science & Technology
+    // pre-filled from handbook/frontiers.json (the printed Badge Index);
+    // blank means the badge isn't a frontier badge (special/faith/level awards)
+    frontier: frontierForName(award.name) || '',
 
     handbook: { edition: 'current', pages: [], images: [] },
     intro: '',
