@@ -48,9 +48,9 @@ function importBadges(db, badges, { actor = 'system', notes = null, sourceGenera
     const version = db.prepare('INSERT INTO catalog_versions (imported_at, source_generated_at, badge_count, requirement_count, notes) VALUES (?, ?, ?, ?, ?)')
       .run(now, sourceGeneratedAt, badges.length, reqCount, notes).lastInsertRowid;
 
-    const upBadge = db.prepare(`INSERT INTO badges (id, catalog_version_id, ahg_award_id, name, level_group, levels, classic, pages, image_paths, intro, ahg_history, faith_text, faith_reference, json, active)
-      VALUES (@id, @v, @award, @name, @lg, @levels, @classic, @pages, @images, @intro, @hist, @ftext, @fref, @json, 1)
-      ON CONFLICT(id) DO UPDATE SET catalog_version_id=excluded.catalog_version_id, ahg_award_id=excluded.ahg_award_id, name=excluded.name, level_group=excluded.level_group,
+    const upBadge = db.prepare(`INSERT INTO badges (id, catalog_version_id, ahg_award_id, name, level_group, frontier, levels, classic, pages, image_paths, intro, ahg_history, faith_text, faith_reference, json, active)
+      VALUES (@id, @v, @award, @name, @lg, @frontier, @levels, @classic, @pages, @images, @intro, @hist, @ftext, @fref, @json, 1)
+      ON CONFLICT(id) DO UPDATE SET catalog_version_id=excluded.catalog_version_id, ahg_award_id=excluded.ahg_award_id, name=excluded.name, level_group=excluded.level_group, frontier=excluded.frontier,
         levels=excluded.levels, classic=excluded.classic, pages=excluded.pages, image_paths=excluded.image_paths, intro=excluded.intro, ahg_history=excluded.ahg_history,
         faith_text=excluded.faith_text, faith_reference=excluded.faith_reference, json=excluded.json, active=1`);
     const upGroup = db.prepare(`INSERT INTO badge_groups (id, badge_id, position, label, rule_type, rule_n) VALUES (?, ?, ?, ?, ?, ?)
@@ -68,7 +68,7 @@ function importBadges(db, badges, { actor = 'system', notes = null, sourceGenera
       seenBadges.add(b.id);
       const fc = b.faithConnection || {};
       const hb = b.handbook || {};
-      upBadge.run({ id: b.id, v: version, award: b.awardId, name: b.name, lg: b.levelGroup, levels: j(b.levels || []), classic: b.classic ? 1 : 0, pages: j(hb.pages || []), images: j(hb.images || []), intro: b.intro || null, hist: b.ahgHistory || null, ftext: fc.text || null, fref: fc.reference || null, json: JSON.stringify(b) });
+      upBadge.run({ id: b.id, v: version, award: b.awardId, name: b.name, lg: b.levelGroup, frontier: b.frontier || null, levels: j(b.levels || []), classic: b.classic ? 1 : 0, pages: j(hb.pages || []), images: j(hb.images || []), intro: b.intro || null, hist: b.ahgHistory || null, ftext: fc.text || null, fref: fc.reference || null, json: JSON.stringify(b) });
       b.groups.forEach((g, gi) => {
         const gid = `${b.id}:${gi + 1}`;
         upGroup.run(gid, b.id, gi + 1, g.label || null, g.rule ? g.rule.type : null, g.rule && g.rule.type === 'n_of' ? g.rule.n : null);
@@ -115,15 +115,16 @@ function currentVersion(db) {
   return db.prepare('SELECT * FROM catalog_versions WHERE id = ?').get(JSON.parse(row.value)) || null;
 }
 
-function listBadges(db, { levelGroup = null, includeInactive = false } = {}) {
+function listBadges(db, { levelGroup = null, frontier = null, includeInactive = false } = {}) {
   const where = [];
   const args = [];
   if (!includeInactive) where.push('b.active = 1');
   if (levelGroup) { where.push('b.level_group = ?'); args.push(levelGroup); }
-  const rows = db.prepare(`SELECT b.id, b.ahg_award_id, b.name, b.level_group, b.levels, b.classic, b.pages, b.active,
+  if (frontier) { where.push('b.frontier = ?'); args.push(frontier); }
+  const rows = db.prepare(`SELECT b.id, b.ahg_award_id, b.name, b.level_group, b.frontier, b.levels, b.classic, b.pages, b.active,
       (SELECT COUNT(*) FROM requirements r WHERE r.badge_id = b.id AND r.active = 1) AS requirement_count
     FROM badges b ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY b.level_group, b.name`).all(...args);
-  return rows.map((r) => ({ id: r.id, awardId: r.ahg_award_id, name: r.name, levelGroup: r.level_group, levels: JSON.parse(r.levels), classic: !!r.classic, pages: JSON.parse(r.pages), requirementCount: r.requirement_count, active: !!r.active }));
+  return rows.map((r) => ({ id: r.id, awardId: r.ahg_award_id, name: r.name, levelGroup: r.level_group, frontier: r.frontier, levels: JSON.parse(r.levels), classic: !!r.classic, pages: JSON.parse(r.pages), requirementCount: r.requirement_count, active: !!r.active }));
 }
 
 function getBadge(db, id) {

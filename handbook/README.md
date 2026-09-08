@@ -52,6 +52,7 @@ One file per badge per level group, named `<badge-slug>.<level>.json`
 | `slug` | output file name; kebab-case badge name + level code |
 | `levels` | the handbook levels this page covers, e.g. `["Pioneer", "Patriot"]` |
 | `classic` | `true` when the page carries the CLASSIC seal |
+| `frontier` | the handbook chapter: `Heritage`, `Family Living`, `Arts`, `Outdoor Skills`, `Personal Well-Being`, or `Science & Technology` (loose spellings normalize; the UI filters on it) |
 | `handbook` | `{ edition, pages: [182, 183], images: [] }` — `images` are paths in the leaders-only SharePoint library, filled in later |
 | `intro`, `ahgHistory` | paragraphs as printed (`ahgHistory` may be `null`) |
 | `faithConnection` | `{ text, reference }` — text as printed (italics dropped), `reference` like `"Job 12:7-10, NIV"` |

@@ -62,13 +62,15 @@ function scaffold(award) {
     )),
   }));
   return {
-    _README: 'Fill in every "text" (the printed wording), the intro/ahgHistory/faithConnection, handbook.pages, and classic. _catalogTitle is AHGFamily\'s short title, shown only as a hint — leave it or delete it. Then: npm run build:badges',
+    _README: 'Fill in every "text" (the printed wording), the intro/ahgHistory/faithConnection, handbook.pages, classic, and frontier (the handbook chapter). _catalogTitle is AHGFamily\'s short title, shown only as a hint — leave it or delete it. Then: npm run build:badges',
     awardId: award.awardId,
     name: award.name,
     levelGroup: award.levelGroup,
     slug: `${slugify(award.name)}.${lv.code}`,
     levels: lv.levels,
     classic: false,
+    frontier: '', // the handbook chapter: Heritage | Family Living | Arts | Outdoor Skills | Personal Well-Being | Science & Technology
+
     handbook: { edition: 'current', pages: [], images: [] },
     intro: '',
     ahgHistory: null,

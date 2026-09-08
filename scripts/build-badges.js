@@ -24,6 +24,16 @@ const path = require('path');
 const { makePaths } = require('./fetch-ahgfamily-catalog');
 
 const readJson = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
+
+// The handbook's six Frontiers (chapter = frontier). Annotations may write
+// them loosely ("science and technology frontier"); storage is canonical.
+const FRONTIERS = ['Heritage', 'Family Living', 'Arts', 'Outdoor Skills', 'Personal Well-Being', 'Science & Technology'];
+function normalizeFrontier(v) {
+  if (v == null || v === '') return { value: null };
+  const t = String(v).toLowerCase().replace(/\bfrontier\b/g, '').replace(/&/g, 'and').replace(/[^a-z]+/g, ' ').trim();
+  const hit = FRONTIERS.find((f) => f.toLowerCase().replace(/&/g, 'and').replace(/[^a-z]+/g, ' ').trim() === t);
+  return hit ? { value: hit } : { error: `unknown frontier "${v}" — one of: ${FRONTIERS.join(' | ')}` };
+}
 const ruleSig = (r) => (!r ? null : r.type === 'all' ? 'all' : `n_of:${r.n}`);
 
 /** Flatten a catalog award to number-keyed leaves (parents with children expand to "2a"). */
@@ -52,6 +62,8 @@ function buildBadge(ann, award, { fetchedAt = null, annotationFile = null } = {}
   if (award.levelGroup !== ann.levelGroup) e(`levelGroup mismatch: annotation "${ann.levelGroup}", catalog "${award.levelGroup}"`);
   if (award.retired) e('award is retired on AHGFamily — not buildable');
   if (award.wholeAwardOnly) e('award has no requirement items on AHGFamily (whole-award only)');
+  const frontier = normalizeFrontier(ann.frontier);
+  if (frontier.error) e(frontier.error);
   const cgroups = (award.groups || []).filter((g) => g.plannable !== false);
   if (cgroups.length !== ann.groups.length) e(`group count: annotation ${ann.groups.length}, catalog ${cgroups.length} [${cgroups.map((g) => g.label).join(' | ')}]`);
   const creqs = catalogRequirements({ groups: cgroups });
@@ -88,7 +100,7 @@ function buildBadge(ann, award, { fetchedAt = null, annotationFile = null } = {}
     badge: {
       id: ann.slug.replace(/\./g, '-'),
       awardId: award.awardId, name: award.name, levelGroup: award.levelGroup, levels: ann.levels,
-      imageSlug: award.imageSlug || null, classic: !!ann.classic,
+      imageSlug: award.imageSlug || null, classic: !!ann.classic, frontier: frontier.value,
       handbook: { edition: 'current', pages: [], images: [], ...(ann.handbook || {}) },
       intro: ann.intro || null, ahgHistory: ann.ahgHistory || null, faithConnection: ann.faithConnection || null,
       groups, requirementCount: creqs.length,
@@ -136,4 +148,4 @@ function main(argv) {
 }
 
 if (require.main === module) main(process.argv.slice(2));
-module.exports = { buildBadge, catalogRequirements };
+module.exports = { FRONTIERS, normalizeFrontier, buildBadge, catalogRequirements };

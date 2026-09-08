@@ -35,7 +35,7 @@ class PlanError extends Error {
 
 const itemRows = (db, planId) => db.prepare(`
   SELECT pi.id, pi.requirement_id, pi.role, pi.position, pi.notes,
-         r.number, r.letter, r.title, r.badge_id, b.name AS badge_name, b.level_group AS badge_level_group
+         r.number, r.letter, r.title, r.text, r.sub_items, r.badge_id, b.name AS badge_name, b.level_group AS badge_level_group
   FROM plan_items pi JOIN requirements r ON r.id = pi.requirement_id JOIN badges b ON b.id = r.badge_id
   WHERE pi.plan_id = ? ORDER BY pi.position`).all(planId);
 
@@ -54,6 +54,8 @@ const planOut = (db, p) => ({
     number: i.number,
     letter: i.letter,
     title: i.title,
+    text: i.text,
+    subItems: JSON.parse(i.sub_items || '[]'),
     role: i.role,
     position: i.position,
     notes: i.notes,

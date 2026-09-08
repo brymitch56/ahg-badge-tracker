@@ -90,7 +90,8 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
 
   api.get('/badges', leader, (req, res) => {
     const levelGroup = typeof req.query.levelGroup === 'string' ? req.query.levelGroup : null;
-    res.json(catalog.listBadges(db, { levelGroup, includeInactive: req.query.includeInactive === '1' }));
+    const frontier = typeof req.query.frontier === 'string' ? req.query.frontier : null;
+    res.json(catalog.listBadges(db, { levelGroup, frontier, includeInactive: req.query.includeInactive === '1' }));
   });
   api.get('/badges/:id', leader, (req, res) => {
     const b = catalog.getBadge(db, req.params.id);
