@@ -202,3 +202,32 @@ test('year overview: plan-based bars — needed honors n_of, done = completing i
   );
   assert.equal((await get('/api/v1/progress/year?from=bad&to=2027-01-01', t)).status, 400);
 });
+
+test('year badge detail: sessions listed, gaps split required vs optional, met n_of hides remaining', async () => {
+  const t = await token({ groups: [GROUP], preferred_username: 'leader@example.com' });
+  const from = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+  const to = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10);
+  // plans from the previous test: past event has 1 session + 3 session + 2 start; future has 2 finish + 4 session
+  const d = await (await get(`/api/v1/progress/year/badge?badgeId=example-badge-pipa&unit=${encodeURIComponent('Pioneer/Patriot')}&from=${from}&to=${to}`, t)).json();
+  assert.equal(d.name, 'Example Badge');
+  const [allGroup, nOf] = d.groups;
+  // all-group: req 1 planned+done (past session); req 2 planned (future finish) with a past start on record
+  const r1 = allGroup.requirements.find((r) => r.number === 1);
+  const r2 = allGroup.requirements.find((r) => r.number === 2);
+  assert.deepEqual({ planned: r1.planned, done: r1.done }, { planned: true, done: true });
+  assert.deepEqual({ planned: r2.planned, done: r2.done, startedOnly: r2.startedOnly }, { planned: true, done: false, startedOnly: false });
+  assert.deepEqual(r2.sessions.map((s) => s.role), ['start', 'finish'], 'chronological');
+  assert.equal(allGroup.remaining, 0);
+  // n_of(1): both 3 and 4 planned → plannedCount capped at need, remaining 0 (UI hides the group)
+  assert.deepEqual({ need: nOf.need, plannedCount: nOf.plannedCount, remaining: nOf.remaining }, { need: 1, plannedCount: 1, remaining: 0 });
+
+  // narrow the window to exclude the future event: req 2 falls back to startedOnly, n_of loses req 4
+  const narrowTo = new Date(Date.now() + 864e5).toISOString().slice(0, 10);
+  const n = await (await get(`/api/v1/progress/year/badge?badgeId=example-badge-pipa&unit=${encodeURIComponent('Pioneer/Patriot')}&from=${from}&to=${narrowTo}`, t)).json();
+  const nr2 = n.groups[0].requirements.find((r) => r.number === 2);
+  assert.deepEqual({ planned: nr2.planned, startedOnly: nr2.startedOnly }, { planned: false, startedOnly: true });
+  assert.equal(n.groups[0].remaining, 1, 'req 2 needs planning again in this window');
+
+  assert.equal((await get('/api/v1/progress/year/badge?badgeId=nope&unit=Explorer&from=2026-09-01&to=2027-08-31', t)).status, 404);
+  assert.equal((await get('/api/v1/progress/year/badge?badgeId=example-badge-pipa&unit=Pathfinders&from=2026-09-01&to=2027-08-31', t)).status, 400);
+});

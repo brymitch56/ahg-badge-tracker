@@ -223,4 +223,60 @@ function yearOverview(db, { from, to }) {
   return { from, to, units: out };
 }
 
-module.exports = { PLAN_LEVEL_GROUPS, ROLES, badgeAllowedInPlan, PlanError, getPlans, putPlan, yearOverview };
+
+/**
+ * One badge's plan for the year, for the dashboard's drill-down modal:
+ * every plan item on this unit's events in [from, to], per requirement,
+ * plus what still needs planning — required (all-group) gaps first, then
+ * n_of groups only while their threshold isn't met by planned items.
+ */
+function yearBadgeDetail(db, { badgeId, unit, from, to }) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from || '') || !/^\d{4}-\d{2}-\d{2}$/.test(to || '')) throw new PlanError(400, 'from and to must be YYYY-MM-DD');
+  if (!PLAN_LEVEL_GROUPS.includes(unit)) throw new PlanError(400, `unit must be one of ${PLAN_LEVEL_GROUPS.join(' | ')}`);
+  const badge = db.prepare('SELECT id, name, level_group, frontier FROM badges WHERE id = ?').get(badgeId);
+  if (!badge) throw new PlanError(404, 'unknown badge');
+  const rows = db.prepare(`
+    SELECT pi.requirement_id, pi.role, e.id AS event_id, e.title, e.start_at, e.end_at
+    FROM plan_items pi
+    JOIN plans pl ON pl.id = pi.plan_id
+    JOIN events e ON e.id = pl.event_id
+    JOIN requirements r ON r.id = pi.requirement_id
+    WHERE pl.level_group = ? AND r.badge_id = ? AND e.start_at >= ? AND e.start_at <= ?
+    ORDER BY e.start_at`).all(unit, badgeId, from, `${to}T` + String.fromCharCode(0xffff));
+  const nowIso = new Date().toISOString();
+  const byReq = new Map();
+  for (const row of rows) {
+    const list = byReq.get(row.requirement_id) || byReq.set(row.requirement_id, []).get(row.requirement_id);
+    list.push({ eventId: row.event_id, title: row.title, startAt: row.start_at, role: row.role, past: (row.end_at || row.start_at) <= nowIso });
+  }
+  const groups = db.prepare('SELECT * FROM badge_groups WHERE badge_id = ? ORDER BY position').all(badgeId).map((gr) => {
+    const reqs = db.prepare('SELECT * FROM requirements WHERE group_id = ? AND active = 1 ORDER BY number, letter').all(gr.id).map((r) => {
+      const sessions = byReq.get(r.id) || [];
+      const planned = sessions.some((s) => s.role === 'session' || s.role === 'finish');
+      return {
+        requirementId: r.id,
+        number: r.number,
+        letter: r.letter,
+        title: r.title,
+        planned,
+        done: sessions.some((s) => (s.role === 'session' || s.role === 'finish') && s.past),
+        startedOnly: !planned && sessions.length > 0,
+        sessions,
+      };
+    });
+    const need = gr.rule_type === 'n_of' ? Math.min(gr.rule_n || reqs.length, reqs.length) : reqs.length;
+    const plannedCount = reqs.filter((r) => r.planned).length;
+    return {
+      label: gr.label,
+      ruleType: gr.rule_type,
+      ruleN: gr.rule_n,
+      need,
+      plannedCount: Math.min(plannedCount, need),
+      remaining: Math.max(0, need - plannedCount),
+      requirements: reqs,
+    };
+  });
+  return { badgeId: badge.id, name: badge.name, frontier: badge.frontier, levelGroup: badge.level_group, unit, from, to, groups };
+}
+
+module.exports = { PLAN_LEVEL_GROUPS, ROLES, badgeAllowedInPlan, PlanError, getPlans, putPlan, yearOverview, yearBadgeDetail };
