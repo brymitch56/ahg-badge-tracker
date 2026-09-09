@@ -1,4 +1,4 @@
-# Handoff — where the build stands (Sept 8, 2026)
+# Handoff — where the build stands (Sept 8, 2026, evening)
 
 Read `CLAUDE.md` first (public repo, PII rules, read-only AHGFamily rule,
 copyright rule). Then this file, then `docs/tracker-service-spec.md`
@@ -26,7 +26,7 @@ copyright rule). Then this file, then `docs/tracker-service-spec.md`
   with .env at every request; .env entries are the un-removable recovery
   hatch). Local page testing: `assets/config.local.example.js` +
   `scripts/serve-local.js` + SSH tunnel to the Pi.
-- **Tests**: `npm test` → 67 passing, all offline (invented fixtures,
+- **Tests**: `npm test` → 97 passing, all offline (invented fixtures,
   local JWKS, in-memory SQLite). Must pass before any push.
 
 ## Server features beyond the original spec
@@ -46,6 +46,28 @@ copyright rule). Then this file, then `docs/tracker-service-spec.md`
   "Women's History" (newer than the printing — set by hand when annotated).
 - Plan items serve full requirement `text` + `subItems` (catalog titles
   are shortened; planner shows real wording).
+- **Service Stars — read side BUILT (Sept 8, 2026), not yet deployed or
+  live-verified.** `docs/service-stars-plan.md` build order 1–4 done:
+  `lib/parse.js` isNew fix + `parseAhgDate` (epoch-0 → null), `lib/grid.js`
+  (kartik grid parser, summary row excluded wherever it sits, pager hrefs,
+  `_tog` hash discovery), `lib/service.js` (/activities index — identity
+  only, hours truncated there; profile advancement page — precise ledger
+  in integer hundredths, eligibility cross-check, per-instance awards),
+  `lib/stars.js` (carry-forward chain, approved hours only, Pathfinder
+  excluded, baseline-aware), migration 006 (`service_hours`,
+  `award_instances`, `star_baseline`, `star_proposals`, push_queue
+  `add_instance`), `server/lib/servicepull.js` (weekly pull: one profile
+  page per mapped girl + a Standard fragment per star level up to hers;
+  collected then written in one transaction; any unreadable/incomplete
+  ledger aborts the run — nothing written). API: `POST /sync/service`,
+  `GET /stars`, `GET /stars/proposals`, `POST /stars/proposals/decide`;
+  star conflicts (`star_more_on_record`, `star_instance_removed`, no
+  requirement id) go through `/conflicts` — accept_ahgfamily re-baselines
+  the level. Website: Progress → "Service stars" chip (bulk confirm/reject,
+  per-girl grid), Admin → "Pull service hours" button, conflict/queue rows.
+  Allow-list now includes GET `/activities`, `/profile`, `/profile/<u…>`;
+  a FORBIDDEN list in `lib/ahgfamily.js` refuses toggleServiceVerified,
+  delete/update, process-advancement whatever the method.
 
 ## Catalog / annotation status
 
@@ -63,12 +85,23 @@ copyright rule). Then this file, then `docs/tracker-service-spec.md`
 
 ## Next work (in likely order)
 
-1. **Service Stars — read side** (`docs/service-stars-plan.md` draft 2 is
-   the contract; capture findings in `data/captures/service-notes.md`,
-   local only). Starts with the `parseStandardState` isNew fix (blank
-   instance panels currently count as records — would false-conflict every
-   star holder). Then migration, weekly-pull extension, baseline, math,
-   proposals UI with bulk confirm. No writes.
+1. **Service Stars — deploy and verify live** (code is on main; the site
+   is deployed on push). On the Pi: `git pull && npm ci --omit=dev && sudo
+   systemctl restart ahg-badge-tracker` (migration 006 runs on start), then
+   Admin → "Pull service hours" with Bryan watching. The first run is a
+   backfill; check the summary's `warnings` and `crossCheck`. Things the
+   parsers met only via captures/invented fixtures and MUST be checked on
+   that first pull (any mismatch aborts the run rather than writing):
+   - the profile page's grid headers (`Service Date · Act of Service ·
+     Time Spent · Girl Level · Verified`) and pager links (paging is
+     followed via the grid's own hrefs — never guessed);
+   - the awards grid parse (`aw…`/`ad…` in the row markup) — currently
+     informational only ("awards grid not found" is just a warning; stars
+     on record come from the Standard fragments, which are verified);
+   - per-girl profile access under the pull account (role scoping);
+   - `Time Spent` really unrounded (sum one girl against her export).
+   Plan-doc step 5 (pre-write verifications) is still open and belongs
+   before any push code.
 2. **Step 7 — push to AHGFamily**: still deliberately unbuilt, behind a
    flag, needs Bryan's explicit go after real-meeting testing. The star
    `add_instance` push may be its lowest-risk pilot. Includes the weekly

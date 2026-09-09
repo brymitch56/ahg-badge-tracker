@@ -2,8 +2,14 @@
 
 *Sept 2026 · supersedes draft 1. Every draft-1 open question is resolved by
 the capture session (raw + full findings: `data/captures/service-notes.md`,
-local only — it documents live AHGFamily pages). Still planning: nothing is
-built. Award ids and endpoint shapes here are program data, committable.*
+local only — it documents live AHGFamily pages). Award ids and endpoint
+shapes here are program data, committable.*
+
+**Status (Sept 8, 2026): build order 1–4 BUILT and merged (see
+`docs/HANDOFF.md`); not yet deployed or verified against the live site.
+Step 5 (pre-write verifications) and step 6 (the push) remain open. The
+pull reads the per-girl profile page for hours (the `/activities` grid
+truncates them) and the Standard fragment per star level for instances.**
 
 ## Policy (decided)
 
