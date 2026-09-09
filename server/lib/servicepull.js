@@ -321,7 +321,14 @@ function listStars(db, { girlId = null } = {}) {
       const pending = db.prepare("SELECT level, COUNT(*) AS n FROM star_proposals WHERE girl_id = ? AND status = 'proposed' GROUP BY level").all(g.id);
       const unverified = db.prepare('SELECT level, SUM(hundredths) AS h FROM service_hours WHERE girl_id = ? AND verified = 0 GROUP BY level').all(g.id);
       const lastFetched = db.prepare('SELECT MAX(fetched_at) AS t FROM service_hours WHERE girl_id = ?').get(g.id).t;
+      // Pathfinder rows are an attendance artefact on AHGFamily (troop
+      // ruling: they never count and never carry). Surface them so a leader
+      // can review/revise the entries there; the math above ignores them.
+      const pf = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(CASE WHEN verified = 1 THEN hundredths END), 0) AS ok,
+                             COALESCE(SUM(CASE WHEN verified = 0 THEN hundredths END), 0) AS pend
+                             FROM service_hours WHERE girl_id = ? AND level = 'Pathfinder' AND hundredths IS NOT NULL`).get(g.id);
       return {
+        pathfinderHours: pf.n ? { entries: pf.n, approved: pf.ok / 100, pending: pf.pend / 100 } : null,
         id: g.id,
         firstName: g.first_name,
         lastName: g.last_name,

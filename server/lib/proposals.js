@@ -252,7 +252,12 @@ function girlProgress(db, girl, { levelGroup = null } = {}) {
         };
       }),
     }));
-    return { badgeId: b.id, name: b.name, levelGroup: b.level_group, ...badgeStatusFor(db, girl.id, b.id), groups };
+    // eligible = earnable at the girl's CURRENT level (spec rule 9). A badge
+    // from an earlier level stays visible once she has activity on it, but
+    // further requirement recording for it happens directly in AHGFamily.
+    const levels = b.level_group === 'All' ? null : PLAN_GIRL_LEVELS[b.level_group];
+    const eligible = !girl.ahg_level || !levels ? true : levels.includes(girl.ahg_level);
+    return { badgeId: b.id, name: b.name, levelGroup: b.level_group, eligible, ...badgeStatusFor(db, girl.id, b.id), groups };
   });
 }
 

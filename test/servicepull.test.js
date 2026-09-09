@@ -221,6 +221,8 @@ test('stars view: hours, carry, on record, pending hours, next-star progress; pr
   assert.equal(d.levels.every((l) => l.hours === 0), true);
   const c = v.girls.find((g) => g.id === cora);
   assert.equal(c.levels.find((l) => l.level === 'Explorer').legacy, 3);
+  assert.deepEqual(c.pathfinderHours, { entries: 1, approved: 4, pending: 0 }, 'Pathfinder rows surfaced for review on AHGFamily');
+  assert.equal(b.pathfinderHours, null);
   assert.equal(c.levels.find((l) => l.level === 'Patriot').toNextHours, 19, '41 h → 2 stars, 1.00 carry → 19.00 to the next');
 
   const props = await (await get('/api/v1/stars/proposals', leaderT)).json();

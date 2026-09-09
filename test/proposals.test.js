@@ -222,6 +222,9 @@ test('rule 1: badge_status derived from group rules; progress views', async () =
   assert.equal(p.girl.firstName, 'Bea');
   assert.equal(p.badges.length, 1);
   assert.deepEqual({ status: p.badges[0].status, confirmed: p.badges[0].confirmedCount }, { status: 'in_progress', confirmed: 1 });
+  assert.equal(p.badges[0].eligible, true, 'a Pioneer/Patriot badge is earnable by a Pioneer');
+  const ex = await (await get(`/api/v1/girls/${expl}/progress`, t)).json();
+  assert.equal(ex.badges[0].eligible, false, 'an Explorer cannot earn a Pioneer/Patriot badge — the UI hides it unless she has activity on it');
   const flat = p.badges[0].groups.flatMap((g) => g.requirements);
   assert.equal(flat.find((x) => x.requirementId === 'example-badge-pipa:1').state, 'confirmed');
   assert.equal(flat.find((x) => x.requirementId === 'example-badge-pipa:4').state, 'none');
