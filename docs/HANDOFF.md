@@ -46,8 +46,8 @@ copyright rule). Then this file, then `docs/tracker-service-spec.md`
   "Women's History" (newer than the printing — set by hand when annotated).
 - Plan items serve full requirement `text` + `subItems` (catalog titles
   are shortened; planner shows real wording).
-- **Service Stars — read side BUILT (Sept 8, 2026), not yet deployed or
-  live-verified.** `docs/service-stars-plan.md` build order 1–4 done:
+- **Service Stars — read side BUILT and DEPLOYED (Sept 8, 2026); see
+  Next work #1 for the live-verification result.** `docs/service-stars-plan.md` build order 1–4 done:
   `lib/parse.js` isNew fix + `parseAhgDate` (epoch-0 → null), `lib/grid.js`
   (kartik grid parser, summary row excluded wherever it sits, pager hrefs,
   `_tog` hash discovery), `lib/service.js` (/activities index — identity
@@ -85,21 +85,23 @@ copyright rule). Then this file, then `docs/tracker-service-spec.md`
 
 ## Next work (in likely order)
 
-1. **Service Stars — deploy and verify live** (code is on main; the site
-   is deployed on push). On the Pi: `git pull && npm ci --omit=dev && sudo
-   systemctl restart ahg-badge-tracker` (migration 006 runs on start), then
-   Admin → "Pull service hours" with Bryan watching. The first run is a
-   backfill; check the summary's `warnings` and `crossCheck`. Things the
-   parsers met only via captures/invented fixtures and MUST be checked on
-   that first pull (any mismatch aborts the run rather than writing):
-   - the profile page's grid headers (`Service Date · Act of Service ·
-     Time Spent · Girl Level · Verified`) and pager links (paging is
-     followed via the grid's own hrefs — never guessed);
-   - the awards grid parse (`aw…`/`ad…` in the row markup) — currently
-     informational only ("awards grid not found" is just a warning; stars
-     on record come from the Standard fragments, which are verified);
-   - per-girl profile access under the pull account (role scoping);
-   - `Time Spent` really unrounded (sum one girl against her export).
+1. **Service Stars — DEPLOYED and live-verified (Sept 8, 2026, late).**
+   Migration 006 applied on the Pi; two full pulls ran clean (29 girls,
+   92 requests, ~70 s, 583 ledger rows of which 356 fractional — `Time
+   Spent` is unrounded; 126 star instances; 63 baselines; 0 proposals —
+   nobody is owed a star today; 0 conflicts; no latch). Profile access
+   under the pull account covers every mapped girl; ledger headers and
+   single-page ledgers parsed as designed (no girl needed paging yet — the
+   pager-following path is still only fixture-tested). The awards grid on
+   the profile page did NOT parse (`awards grid not found` — informational;
+   stars on record come from the verified Standard fragments), so a
+   session with a saved profile capture could fix its header/ids later.
+   **Finding for Bryan/the coordinator:** AHGFamily's own `Stars Eligible`
+   carries approved Pathfinder hours into Tenderheart (4 girls, gaps of 1–2
+   stars each, exactly explained), and the 6 "legacy" baselines are those
+   hand-awarded Tenderheart/Explorer stars; the tracker follows the troop
+   ruling (Pathfinder never counts) and just notes the difference in the
+   pull summary's `crossCheck`. Weekly pull is now armed on the scheduler.
    Plan-doc step 5 (pre-write verifications) is still open and belongs
    before any push code.
 2. **Step 7 — push to AHGFamily**: still deliberately unbuilt, behind a
