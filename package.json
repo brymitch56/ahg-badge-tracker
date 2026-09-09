@@ -13,7 +13,7 @@
     "reparse": "node scripts/reparse-raw.js",
     "fetch:staging": "node scripts/fetch-ahgfamily-catalog.js --staging --keep-raw",
     "diff": "node scripts/diff-catalog.js",
-    "test": "node --test test/parse.test.js test/diff.test.js test/build.test.js test/server.test.js test/checkin.test.js test/mapping.test.js test/plans.test.js test/proposals.test.js test/ahgpull.test.js test/backup.test.js test/access.test.js",
+    "test": "node --test test/parse.test.js test/service.test.js test/stars.test.js test/diff.test.js test/build.test.js test/server.test.js test/checkin.test.js test/mapping.test.js test/plans.test.js test/proposals.test.js test/ahgpull.test.js test/backup.test.js test/access.test.js",
     "start": "node server/index.js",
     "migrate": "node server/scripts/migrate.js",
     "import:catalog": "node server/scripts/import-catalog.js",

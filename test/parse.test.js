@@ -135,3 +135,70 @@ test('cookie jar honours deletions and last-write-wins', () => {
   jar.absorbLines(['b=; Max-Age=0']);
   assert.equal(jar.header(), 'a=3');
 });
+
+// ---- Service Stars read side: instance panels and AHGFamily dates ---------
+// Markup shape from the capture notes: every panel carries five fields; a
+// BLANK slot also carries new-<id>="true"; a saved instance has no new-.
+const panel = (adId, { isNew = false, completedOn = '', awardedOn = '', purchased = '', comment = '' } = {}) => `
+  <div class="award-instance">
+    ${isNew ? `<input type="hidden" name="new-${adId}" value="true">` : ''}
+    <input type="text" name="completed_on-${adId}" value="${completedOn}">
+    <input type="text" name="awarded_on-${adId}" value="${awardedOn}">
+    <input type="text" name="purchased-${adId}" value="${purchased}">
+    <input type="text" name="comment-${adId}" value="${comment}">
+  </div>`;
+
+test('parseStandardState: 5 saved + 5 blank panels count as 5 instances (isNew discriminator)', () => {
+  const saved = ['adtest00s001', 'adtest00s002', 'adtest00s003', 'adtest00s004', 'adtest00s005'];
+  const blanks = ['adtest00b001', 'adtest00b002', 'adtest00b003', 'adtest00b004', 'adtest00b005'];
+  const html = `<form>
+    ${panel(saved[0], { completedOn: '05/10/2024', awardedOn: '06/01/2024', purchased: '1' })}
+    ${panel(saved[1], { completedOn: '05/10/2024', comment: 'Court of Awards' })}
+    ${panel(saved[2], { completedOn: '05/10/2024' })}
+    ${panel(saved[3], { completedOn: '11/02/2025', awardedOn: '12/31/1969' })}
+    ${panel(saved[4], { completedOn: '' })}
+    ${blanks.map((id) => panel(id, { isNew: true })).join('')}
+  </form>`;
+  const st = P.parseStandardState(html, { awardId: 'awtest0star1' });
+  assert.equal(st.records.length, 10, 'every panel is reported');
+  assert.equal(st.instanceCount, 5, 'only saved panels are instances');
+  assert.deepEqual(st.records.filter((r) => !r.isNew).map((r) => r.adId), saved);
+  assert.deepEqual(st.records.filter((r) => r.isNew).map((r) => r.adId), blanks);
+  // same-date instances stay distinct (keyed by record id, never by date)
+  assert.equal(st.records.filter((r) => r.completedOn === '05/10/2024').length, 3);
+  assert.deepEqual(st.records[0], { adId: saved[0], isNew: false, completedOn: '05/10/2024', awardedOn: '06/01/2024', purchased: true, comment: null });
+  assert.equal(st.records[1].comment, 'Court of Awards');
+  assert.equal(st.records[3].awardedOn, null, 'epoch-0 reads as null');
+  assert.equal(st.records[4].isNew, false, 'an undated saved instance is still an instance');
+  // record comments never leak into the requirement map
+  assert.deepEqual(Object.keys(st.items), []);
+});
+
+test('parseStandardState: record-panel comments stay off the requirement map; requirement ids that start with "ad" still work', () => {
+  const html = `<form>
+    <input type="checkbox" name="checkbox-adreq00test1" checked>
+    <input type="text" name="date-adreq00test1" value="9/2/2026">
+    <textarea name="comment-adreq00test1">a requirement whose id happens to start with ad</textarea>
+    ${panel('adtest00s009', { completedOn: '9/3/2026', comment: 'whole-award note' })}
+  </form>`;
+  const st = P.parseStandardState(html, { awardId: 'awtest0badge' });
+  assert.deepEqual(st.items, { adreq00test1: { checked: true, date: '9/2/2026', comment: 'a requirement whose id happens to start with ad' } });
+  assert.deepEqual(st.records, [{ adId: 'adtest00s009', isNew: false, completedOn: '9/3/2026', awardedOn: null, purchased: false, comment: 'whole-award note' }]);
+  assert.equal(st.instanceCount, 1);
+});
+
+test('parseAhgDate: M/D/YYYY, MM/DD/YY, ISO; epoch-0 spellings read as null', () => {
+  assert.equal(P.parseAhgDate('9/1/2026'), '2026-09-01');
+  assert.equal(P.parseAhgDate('07/12/26'), '2026-07-12');
+  assert.equal(P.parseAhgDate('2026-09-01'), '2026-09-01');
+  assert.equal(P.parseAhgDate(' 12/31/1969 '), null);
+  assert.equal(P.parseAhgDate('01/01/1970'), null);
+  assert.equal(P.parseAhgDate('12/31/69'), null);
+  assert.equal(P.parseAhgDate('1/1/70'), null);
+  assert.equal(P.parseAhgDate(''), null);
+  assert.equal(P.parseAhgDate(null), null);
+  assert.equal(P.parseAhgDate('not a date'), null);
+  assert.equal(P.parseAhgDate('13/40/2026'), null);
+  assert.equal(P.isEpochZeroDate('12/31/1969'), true);
+  assert.equal(P.isEpochZeroDate('12/30/1969'), false);
+});

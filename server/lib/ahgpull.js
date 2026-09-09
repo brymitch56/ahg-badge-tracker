@@ -24,7 +24,7 @@
  * latch); a latched tracker refuses to pull before any request is made.
  */
 const A = require('../../lib/ahgfamily');
-const { parseGridState, parseStandardState } = require('../../lib/parse');
+const { parseGridState, parseStandardState, parseAhgDate } = require('../../lib/parse');
 const mapping = require('./mapping');
 const { recordRun } = require('./mirror');
 
@@ -35,11 +35,10 @@ class PullError extends Error {
 const now = () => new Date().toISOString();
 
 // AHGFamily dates render as M/D/YYYY; store YYYY-MM-DD like everything else.
+// Epoch-0 artefacts (12/31/1969) read as null — see parseAhgDate.
 function isoDate(s) {
   if (!s) return null;
-  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s.trim());
-  if (m) return `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
-  return /^\d{4}-\d{2}-\d{2}$/.test(s.trim()) ? s.trim() : s.trim();
+  return parseAhgDate(s);
 }
 
 /** Live transport: one login for the whole run, throttled, logout after. */
@@ -149,7 +148,9 @@ async function pullAhgState(db, cfg, { sessionFactory = makeLiveSession, key = n
             db.prepare('UPDATE ahg_state SET earned_on = COALESCE(?, earned_on), comment = COALESCE(?, comment) WHERE girl_id = ? AND requirement_id = ?')
               .run(isoDate(d.date), d.comment, girl.id, reqId);
           }
-          const rec = st.records.find((r) => r.completedOn) || st.records[0];
+          // prefer a SAVED instance (no new- field); a blank slot is only a fallback
+          const saved = st.records.filter((r) => !r.isNew);
+          const rec = saved.find((r) => r.completedOn) || saved[0] || st.records[0];
           if (rec) {
             db.prepare(`UPDATE ahg_state SET ad_record_id = ? WHERE girl_id = ? AND requirement_id IN
                         (SELECT id FROM requirements WHERE badge_id = ?)`).run(rec.adId, girl.id, badge.id);

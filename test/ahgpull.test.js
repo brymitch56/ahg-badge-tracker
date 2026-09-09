@@ -119,7 +119,8 @@ test('parseGridState / parseStandardState read the observed markup', () => {
   }), { awardId: AWARD });
   assert.deepEqual(st.items['r00000test01'], { checked: true, date: '9/1/2026', comment: 'Done at camp & home' });
   assert.deepEqual(st.items['r00000test04'], { checked: false, date: null, comment: null });
-  assert.deepEqual(st.records, [{ adId: 'adtest000001', completedOn: null }]);
+  assert.deepEqual(st.records, [{ adId: 'adtest000001', isNew: true, completedOn: null, awardedOn: null, purchased: false, comment: null }]);
+  assert.equal(st.instanceCount, 0, 'a blank new- slot is not an instance');
   assert.equal(ahgpull.isoDate('9/1/2026'), '2026-09-01');
 });
 
