@@ -1,150 +1,103 @@
-# Handoff — where the build stands (Sept 7, 2026)
+# Handoff — where the build stands (Sept 8, 2026)
 
 Read `CLAUDE.md` first (public repo, PII rules, read-only AHGFamily rule,
-copyright rule). Then this file, then `docs/tracker-service-spec.md` (draft 3).
+copyright rule). Then this file, then `docs/tracker-service-spec.md`
+(draft 3) and `docs/service-stars-plan.md` (draft 2, next feature).
 
-## State
+## Deployed and live
 
-- **Catalog**: 548 AHGFamily awards fetched and parsed (0 warnings), local at
-  `data/ahgfamily/` with raw fragments for offline re-parse (`npm run reparse`).
-- **Pilot badges**: Nature & Wildlife, Our Flag, Toys & Games (Pioneer/Patriot)
-  annotated from handbook scans (`data/handbook/`) and built (`data/badges/`).
-  `scripts/check-pilot-badges.js` passes 3/3.
-- **Tracker service** (`server/`): build order steps 1–3 done — Express 5 +
-  better-sqlite3 (pinned 12.4.1 for prebuilt binaries), migrations
-  (`001-init.sql` = full spec §4 schema, `002-checkin.sql` = webhook dedupe +
-  girls.status), `/health`, MSAL bearer validation (`server/lib/auth.js`),
-  versioned catalog import (`server/lib/catalog.js`), `/api/v1/me`,
-  `/badges`, `/badges/:id`, `/admin/catalog(/import)`, `/admin/audit`.
-- **Step 3 (check-in + mapping)**: Integration API client
-  (`server/lib/checkin.js`, read-only by construction), girls/events/
-  attendance mirror (`server/lib/mirror.js` — ical_uid+start_at identity,
-  youth only, fill-when-empty `ahg_youth_id` from `tlc_user_id`, `open`
-  mirrored verbatim; rule 4b applies at proposal time in step 5), HMAC
-  webhook receiver (`/webhooks/checkin` — raw body, 5-min window, dedupe on
-  type:txn.id, 2xx before re-polling), routes `GET /girls`,
-  `PATCH /girls/:id`, `GET /events(/: id)`, `POST /sync/checkin`,
-  `GET /sync/status`. AHGFamily mapping: `parseYouthSelectPairs`
-  (lib/parse.js; names live only in tracker.db), encrypted credential store
-  (`server/lib/credcrypto.js` + `POST /admin/ahgfamily/credentials`),
-  rule-8 auth latch, `GET/POST /admin/mapping(/refresh|/confirm)` with
-  unambiguous name-match suggestions, leader-confirmed. (The §7 scheduler
-  landed with step 5 — see below.)
-- **Step 4 (plans)**: `server/lib/plans.js` + `GET /events/:id/plans`,
-  `PUT /events/:id/plans/:levelGroup` (URL-encode `Pioneer%2FPatriot`).
-  Plan level groups are the three badge-working units (Tenderheart,
-  Explorer, Pioneer/Patriot); a badge fits a plan when its catalog group
-  matches, is `All`, or is `Pioneer`/`Patriot` inside a PiPa plan —
-  Pathfinders never plan badgework. Replaces are diff-based so a kept
-  requirement keeps its `plan_item` id (participation/completions reference
-  it); removing an item with a live completion is a 409, rejected
-  completions release the item but keep their history, participation
-  cascades. Empty PUT deletes the plan. Everything audited.
-- **Step 5 (proposals & progress)**: `server/lib/proposals.js` — rule 3
-  applied idempotently on every attendance re-poll (webhook, sweep, admin
-  sync): session/finish propose (dated the event's local day), start/
-  continue record participation; rule 4b (only `open: 0` rows) and unit
-  filtering (a PiPa plan applies to Pioneer+Patriot girls). Rule 5
-  reconcile: an un-attended girl's proposed rows withdraw and her
-  participation clears; confirmed rows get `needs_review` (migration 003),
-  shown on the proposals screen, cleared by re-confirm or retracted by
-  reject. Decide endpoint is all-or-nothing and stamps
-  `level_at_completion` from the girl's current level (rule 9).
-  `POST/DELETE /completions` (manual, rule 4; delete refuses once pushed).
-  Progress: `GET /girls/:id/progress` (+`?levelGroup=`),
-  `GET /badges/:id/progress`, badge_status derived per rule 1 (`all` /
-  `n_of`, NULL rule = all). `server/lib/scheduler.js` (§7): nightly events,
-  weekly roster, attendance sweep from end_at+30 min until a post-event
-  fetch finds no open rows (`events.attendance_fetched_at`); started by
-  index.js unless `DISABLE_SCHEDULER`.
-- **Step 6 (AHGFamily pull)**: `server/lib/ahgpull.js` + `parseGridState`/
-  `parseStandardState` (lib/parse.js). One login per run through the
-  read-only allow-list; one Grid request per *active* badge (has local
-  completions/plans/ahg_state — never all 548) covering every mapped girl,
-  plus a Standard detail request only where a checked item is missing its
-  date (earned_on/comment/ad record → `ahg_state`, tracker.db only).
-  Rule 6: complete there + unknown here → confirmed `source: ahgfamily`
-  completion; confirmed here + not there → `push_queue` mark (idle until
-  step 7); was-complete now un-checked → open conflict (migration 004),
-  resolved by a leader (`accept_ahgfamily` retracts locally /
-  `keep_tracker` re-queues); agreement skips the queued mark. Rule 8 latch
-  throughout. Endpoints: `POST /sync/pull`, `GET /sync/queue`,
-  `GET /conflicts`, `POST /conflicts/:id/resolve`; `/sync/status` reports
-  queue counts, open conflicts, AHGFamily state. Scheduler: weekly pull
-  gated on deliberately STORED credentials (the .env dev fallback never
-  auto-pulls), mapped girls, no latch; plus the nightly SQLite backup
-  (`data/backups/`, 14 kept).
-- **Deploy**: `deploy/install-pi.sh` + `deploy/ahg-badge-tracker.service.template`
-  (mirrors troop-checkin's installer; Node 20 only if missing, `npm ci`,
-  `.env` scaffold, migrate, catalog import, systemd unit).
-  `docs/pi-setup.md` is the walkthrough, including testing before Entra
-  (hand-run with `AUTH_DISABLED` on 127.0.0.1 only — the unit's
-  `NODE_ENV=production` refuses the flag) and the data/badges copy step
-  (copyrighted text, never in git).
-- **Tests**: `npm test` → 62 passing, all offline (synthetic fixtures —
-  invented names/ids only — local JWKS, in-memory SQLite).
-- **Verified on Bryan's PC (Sept 7)**: `npm run migrate`,
-  `npm run import:catalog` (version 1: 3 badges, 32 requirements),
-  `npm start` + `/health`, `/api/v1/badges(/:id)` against the real pilot
-  badges — all clean. Mapping refresh against live AHGFamily not yet run
-  (leader's call; it performs a real login).
-- **Entra**: not yet registered. `docs/entra-setup.md` (also a PDF beside the
-  repo) is the admin's guide. Until it exists, `AUTH_DISABLED=true` (dev only)
-  fakes an admin.
-- **Check-in app**: AHG instance not yet installed on the Pi (systemd, no
-  Docker). It will need `TLC_EXPORT_PATH=/user/exportexcel?format=xlsx`.
-  Integration API contract: the troop-checkin repo's `docs/13-integration-api.md`
-  (v0.4.35); consumer notes in `docs/handoff-to-checkin-roster-identity.md`
-  and `docs/reply-to-checkin-roster-identity.md`.
+- **Tracker service**: build-order steps 1–6 complete, running on the Pi
+  (`/opt/ahg-badge-tracker`, systemd, 127.0.0.1:3100). Entra is registered
+  and configured (MSAL auth live), the Cloudflare Tunnel serves
+  `https://badges.ahg2911.org`, and the check-in AHG instance (port 3001 —
+  port 3000 is the Trail Life instance) is wired: Integration API key +
+  HMAC webhook verified. Deploy/ops: `docs/pi-setup.md`,
+  `docs/tunnel-setup.md`; update = `git pull && npm ci --omit=dev &&
+  sudo systemctl restart ahg-badge-tracker` (migrations run on start).
+- **Website leaders pages** (site repo `ahg-troop-ny2911`, checkout
+  `D:\AHG\Website`, work on branch `leaders-sharepoint`, main is merged
+  from it; `gh` CLI is a different account — push with git, no PRs):
+  Badges (frontier+level filters) · Planning (date presets/custom/paging,
+  full handbook text per plan item, auto-growing notes, after-meeting
+  proposals) · Progress (Program-year dashboard with stacked planned/held
+  bars + per-badge drill-down modal, by-girl, by-badge, searchable
+  comboboxes everywhere) · Admin (sync, conflicts, mapping, AHGFamily
+  credentials, **leaders/admins user management** — stored lists merge
+  with .env at every request; .env entries are the un-removable recovery
+  hatch). Local page testing: `assets/config.local.example.js` +
+  `scripts/serve-local.js` + SSH tunnel to the Pi.
+- **Tests**: `npm test` → 67 passing, all offline (invented fixtures,
+  local JWKS, in-memory SQLite). Must pass before any push.
 
-## Decisions that shape the remaining build (all from Bryan)
+## Server features beyond the original spec
 
-- Retired awards and 2016-handbook groups are never plannable (already
-  filtered out of `data/badges/`).
-- Plan items carry `role` ∈ session|start|continue|finish; attendance proposes
-  a completion only on session/finish, records participation otherwise.
-- Attended ⇔ check-in attendance row has `open: 0` (a sign-out exists —
-  kiosk, admin close, or SMS confirmation). Voided sign-out re-opens.
-- Levels: TH/EX badges are separate awards, both earnable; a PiPa badge is one
-  award, earned once, applied to the girl's current level at confirmation
-  (`level_at_completion`); no retroactive handling — corrections happen in
-  AHGFamily and arrive via the weekly pull. Level strings are exactly
-  Pathfinder|Tenderheart|Explorer|Pioneer|Patriot.
-- Girl ↔ AHGFamily `u…` id: no hashid in the export. Fill-when-empty from
-  (1) check-in `tlc_user_id` (kiosk badge scans), (2) tracker mapping screen
-  fed by AHGFamily's `#youth-select` (name-matched, leader-confirmed),
-  (3) manual.
-- Weekly automatic push with a report e-mailed after every run
-  (`report_mode` = always | errors_only). Push ships behind a flag, OFF.
-- Admins: Bryan, the Troop Coordinator, the tenant-admin leader
-  (`ADMIN_EMAILS`). Hostname `badges.<domain>`. No Docker anywhere.
-- Catalog update check is monthly, human-approved (`npm run fetch:staging`,
-  `npm run diff`, `--apply` with an interactive "yes"). Never nightly, never
-  auto-apply.
+- Website-managed access lists (`server/lib/access.js`,
+  GET/POST `/admin/access`; admin e-mail implies leader; self-lockout
+  guard; .env merged per request).
+- Event mirror window widened to today−30…+365 (planner browses a year
+  ahead; spec §7's −7…+90 superseded by decision).
+- `GET /progress/year` + `GET /progress/year/badge` — plan-based
+  program-year coverage (needed honors all/n_of rules; done = completing
+  session's date passed) powering the dashboard + modal.
+- Badges carry `frontier` (migration 005): `handbook/frontiers.json` maps
+  badge name → frontier (transcribed from the printed Badge Index, both
+  handbooks; loose-name matcher absorbs catalog drift). Build falls back
+  to it; scaffold pre-fills it. Catalog has one badge in no index:
+  "Women's History" (newer than the printing — set by hand when annotated).
+- Plan items serve full requirement `text` + `subItems` (catalog titles
+  are shortened; planner shows real wording).
 
-## Build order (spec §10) — next is step 7 (needs Bryan's explicit go)
+## Catalog / annotation status
 
-7. Push behind the flag: read-before-write toggle, `dateSpecified` = the
-   completion date, whole-badge `completed_on` only via the Standard form
-   post and only when rule 1 says complete, auth-failure latch, weekly
-   e-mailed report. **Never** call `/advancement/delete`.
+- 3 pilot badges built and imported (with frontiers). 343 annotatable
+  badges remain (of 548 fetched; rest retired/whole-award-only).
+- `npm run scaffold:annotation -- "<name>" --level <lg>` writes a
+  structure-perfect skeleton (only prose missing); `--list` shows
+  progress. Bryan has 16 scaffolds in flight (Fashion, Home Decorating,
+  Kitchen Scientist, Medical, Native American, Our Heritage, Robotics,
+  Zoology × tend/expl) — they fail the build with "empty text" until
+  filled, which is expected. Flow: fill → `npm run build:badges` → scp
+  `data/badges/` to the Pi → Admin "Re-import". Future: OCR/photograph
+  handbook pages and have a session fill scaffolds directly (pilot badges
+  were done this way). Handbook text never enters git.
 
-Website leaders-area pages: DONE (site repo, ahg-troop-ny2911@65b33d8) —
-leaders-badges/-planning/-progress/-admin.html + assets/tracker.js (shared
-MSAL for the tracker scope + fetch wrapper), gated behind
-config.js tracker:{ baseUrl, scope } (inert until Entra lands; dev-only
-authMode:"disabled" for local testing against AUTH_DISABLED). Smoke-tested
-in a browser against a seeded local tracker. Still ahead: handbook
-scanning for the rest of the book, and step 7 above.
+## Next work (in likely order)
+
+1. **Service Stars — read side** (`docs/service-stars-plan.md` draft 2 is
+   the contract; capture findings in `data/captures/service-notes.md`,
+   local only). Starts with the `parseStandardState` isNew fix (blank
+   instance panels currently count as records — would false-conflict every
+   star holder). Then migration, weekly-pull extension, baseline, math,
+   proposals UI with bulk confirm. No writes.
+2. **Step 7 — push to AHGFamily**: still deliberately unbuilt, behind a
+   flag, needs Bryan's explicit go after real-meeting testing. The star
+   `add_instance` push may be its lowest-risk pilot. Includes the weekly
+   e-mailed run report. Never `/advancement/delete`; also never
+   `/fields/toggleServiceVerified` (a GET that WRITES — new finding) or
+   any per-row Menu/Delete control.
+3. Handbook annotation at scale; Pathfinder beads after stars.
+
+## Operational facts a session may need
+
+- Pi at 192.168.86.125; tracker binds Pi-localhost only (SSH tunnel to
+  reach it from the PC). Scheduler: nightly events sync, weekly roster,
+  attendance sweep (end+30 min until closed), weekly AHGFamily pull
+  (armed only by STORED credentials + mapped girls + no latch), nightly
+  backups (`data/backups/`, 14 kept).
+- Rule 8 latch everywhere: one failed AHGFamily login stops all AHGFamily
+  traffic until credentials are re-entered. Never retry logins.
+- Girls↔AHGFamily mapping: fill-when-empty (checkin scan → mapping screen
+  → manual); verify the first live pull's `ahg_state` against AHGFamily
+  (grid/standard parsers met live markup only via captures so far).
+- Site deploys on push to main (GitHub Pages); an hourly calendar-feed
+  Action also commits to main — merge, don't force.
 
 ## Working notes
 
-- Tests must stay offline: record check-in API responses as fixtures from a
-  local troop-checkin instance; AHGFamily fragments come from
-  `data/ahgfamily/raw` (never commit them — they contain a youth id).
-- Requirement ids are 12 random alphanumerics with no prefix; never classify
-  an id by prefix.
-- `better-sqlite3` is pinned to a version with prebuilds for Node 22 win32-x64
-  and Pi arm64; check before bumping.
-- Deploy to the Pi is a separate, human-triggered session, like the check-in
-  app's.
+- Tests stay offline; fixtures use invented names/ids only.
+- Requirement ids: 12 random alphanumerics, never classify by prefix.
+- better-sqlite3 pinned 12.4.1 (prebuilds Node 22 win32-x64 + Pi arm64).
+- Catalog updates: monthly, human-approved (`fetch:staging` → `diff` →
+  `--apply`); never auto-apply.
+- Beware heredoc/template-literal escape eating when writing JS with
+  regexes via Bash — verify written regexes (`\d`, `\b`) survived.
