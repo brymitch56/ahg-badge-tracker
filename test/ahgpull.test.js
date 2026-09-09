@@ -238,8 +238,14 @@ test('scheduler: weekly pull only with STORED credentials and mapped girls; env 
   catalog.importFromDir(sdb, badgesDir, { actor: 'admin@example.com' });
   sdb.prepare("INSERT INTO girls (first_name, last_name, ahg_level, ahg_youth_id, active, updated_at) VALUES ('Bea', 'Anders', 'Pioneer', 'utest0000001', 1, '2026-09-01T00:00:00Z')").run();
   sdb.prepare(`INSERT INTO completions (girl_id, requirement_id, status, completed_on, source, proposed_at) VALUES (1, 'example-badge-pipa:2', 'confirmed', '2026-08-25', 'manual', '2026-09-01T00:00:00Z')`).run();
+  // The scheduler also runs the weekly Service Stars pull with the same
+  // factory; that session gets a minimal profile page so it fails harmlessly
+  // (its own test lives in servicepull.test.js) and is not counted here.
   let factoryCalls = 0;
-  const countingFactory = async (...a) => { factoryCalls += 1; return fakeSessionFactory(...a); };
+  const countingFactory = async (...a) => {
+    const s = await fakeSessionFactory(...a);
+    return { ...s, grid: async (...g) => { factoryCalls += 1; return s.grid(...g); }, page: async () => '<html></html>' };
+  };
   const client = makeCheckinClient({ base: '', apiKey: '' }); // check-in not configured — pull must still run
   const sched = makeScheduler({ cfg, db: sdb, client, credKey: KEY, ahgSessionFactory: countingFactory, log: () => {} });
   const nowMs = Date.now();
@@ -253,6 +259,7 @@ test('scheduler: weekly pull only with STORED credentials and mapped girls; env 
   out = await sched.tick(nowMs);
   assert.equal(factoryCalls, 1);
   assert.equal(out.pull.kind, 'ahg_state');
+  assert.match(out.serviceError || '', /no service ledger/, 'service pull ran and failed loudly on the blank page');
   assert.equal(out.pull.queued, 1);
 
   out = await sched.tick(nowMs + 60e3);

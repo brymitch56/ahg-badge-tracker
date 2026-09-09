@@ -15,6 +15,7 @@ const mirror = require('./mirror');
 const proposals = require('./proposals');
 const mapping = require('./mapping');
 const ahgpull = require('./ahgpull');
+const servicepull = require('./servicepull');
 const { getSetting, setSetting } = require('./settings');
 const { CheckinError } = require('./checkin');
 
@@ -60,6 +61,19 @@ function makeScheduler({ cfg, db, client, credKey = null, ahgSessionFactory = un
       } catch (e) {
         log(`[tracker] weekly AHGFamily pull failed: ${e.message}`);
         out.pullError = e.message;
+      }
+    }
+
+    // Weekly Service Stars pull (read-only; same guards). Runs on its own
+    // cadence so a failure in one pull never blocks the other.
+    const lastService = db.prepare(`SELECT started_at FROM sync_runs WHERE kind = 'pull' AND ok = 1 AND summary LIKE '%"kind":"service"%' ORDER BY id DESC LIMIT 1`).get();
+    if (age(lastService) >= PULL_EVERY_MS && !mapping.getLatch(db) && mapping.hasStoredCredentials(db, credKey)
+        && db.prepare('SELECT 1 FROM girls WHERE active = 1 AND ahg_youth_id IS NOT NULL LIMIT 1').get()) {
+      try {
+        out.service = await servicepull.pullServiceState(db, cfg, { ...(ahgSessionFactory ? { sessionFactory: ahgSessionFactory } : {}), key: credKey });
+      } catch (e) {
+        log(`[tracker] weekly Service Stars pull failed: ${e.message}`);
+        out.serviceError = e.message;
       }
     }
 

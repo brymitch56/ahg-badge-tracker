@@ -13,6 +13,7 @@ const credcrypto = require('./lib/credcrypto');
 const plans = require('./lib/plans');
 const proposals = require('./lib/proposals');
 const ahgpull = require('./lib/ahgpull');
+const servicepull = require('./lib/servicepull');
 const access = require('./lib/access');
 
 let VERSION = null;
@@ -287,8 +288,32 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
     res.json(rows.map((q) => ({
       id: q.id, status: q.status, action: q.action, date: q.date, girlId: q.girl_id, firstName: q.first_name, lastName: q.last_name,
       badgeId: q.badge_id, badgeName: q.badge_name, requirementId: q.requirement_id, number: q.number, letter: q.letter, title: q.title,
+      ahgAwardId: q.ahg_award_id, starProposalId: q.star_proposal_id, detail: q.detail ? JSON.parse(q.detail) : null,
       attempts: q.attempts, lastError: q.last_error, createdAt: q.created_at, sentAt: q.sent_at,
     })));
+  });
+  // ------------------------------------------------ Service Stars (read) --
+  api.post('/sync/service', admin, async (req, res) => {
+    try {
+      res.json(await servicepull.pullServiceState(db, cfg, {
+        ...(ahgSessionFactory ? { sessionFactory: ahgSessionFactory } : {}), key: credKey(), actor: req.user.email,
+      }));
+    } catch (e) {
+      if (e instanceof ahgpull.PullError) return pullErr(res, e, db);
+      console.error('[tracker] service pull failed:', e);
+      return res.status(502).json({ error: 'service pull failed', detail: e.message });
+    }
+    return undefined;
+  });
+  api.get('/stars', leader, (req, res) => res.json(servicepull.listStars(db, { girlId: req.query.girlId ? Number(req.query.girlId) : null })));
+  api.get('/stars/proposals', leader, (req, res) => res.json(servicepull.listStarProposals(db, { all: req.query.all === '1' })));
+  api.post('/stars/proposals/decide', leader, (req, res) => {
+    try {
+      return res.json(servicepull.decideStarProposals(db, req.body, req.user.email, { tz: cfg.tz }));
+    } catch (e) {
+      if (e instanceof ahgpull.PullError) return pullErr(res, e, db);
+      throw e;
+    }
   });
   api.get('/conflicts', leader, (req, res) => res.json(ahgpull.listConflicts(db, { all: req.query.all === '1' })));
   api.post('/conflicts/:id/resolve', leader, (req, res) => {

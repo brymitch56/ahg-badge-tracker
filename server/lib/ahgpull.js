@@ -58,6 +58,12 @@ async function makeLiveSession(db, { key = null, env = process.env } = {}) {
       await A.sleep(acfg.throttleMs);
       return A.badgeTrackerView(acfg, jar, token, { level: 'all', style: 'standard', youthIds: [youthId], awardId });
     },
+    // GET a page in the signed-in session (allow-list enforced in lib/ahgfamily.js):
+    // the Service Stars profile/activities reads use this.
+    async page(pathWithQuery) {
+      await A.sleep(acfg.throttleMs);
+      return A.getPage(acfg, jar, pathWithQuery);
+    },
     async close() { try { await A.request(acfg, jar, '/logout'); } catch { /* best effort */ } },
   };
 }
@@ -258,6 +264,13 @@ function resolveConflict(db, id, { resolution, note }, actor) {
   if (c.status !== 'open') throw new PullError('conflict', 'already resolved');
   const ts = now();
   const run = db.transaction(() => {
+    if (c.kind.startsWith('star_')) {
+      // Service Star conflict: accepting AHGFamily re-baselines that level
+      // (its count becomes 'explained'); keep_tracker leaves the record alone
+      // and the next pull re-raises it if still unexplained.
+      const level = c.detail ? JSON.parse(c.detail).level : null;
+      if (resolution === 'accept_ahgfamily' && level) require('./servicepull').rebaselineLevel(db, c.girl_id, level, actor);
+    }
     const local = db.prepare("SELECT * FROM completions WHERE girl_id = ? AND requirement_id = ? AND status = 'confirmed'").get(c.girl_id, c.requirement_id);
     if (resolution === 'accept_ahgfamily' && local) {
       db.prepare("UPDATE completions SET status = 'rejected', decided_by = ?, decided_at = ?, notes = COALESCE(notes || ' | ', '') || 'conflict: accepted AHGFamily' WHERE id = ?")
