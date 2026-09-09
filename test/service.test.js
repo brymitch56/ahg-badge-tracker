@@ -204,3 +204,14 @@ test('parseProgress: adjacent "done/total pct%" renderings', () => {
   assert.deepEqual(S.parseProgress('0/100%'), { done: 0, total: 10, pct: 0 });
   assert.equal(S.parseProgress(''), null);
 });
+
+test('grid: kartik "No results found." placeholder row is not a data row (seen live for girls with no service)', () => {
+  const html = `<div id="w9" class="grid-view"><div class="summary"></div><table class="kv-grid-table"><thead><tr><th>Service Date</th><th>Act of Service</th><th>Time Spent</th><th>Girl Level</th><th>Verified</th><th>Menu</th></tr></thead>
+    <tbody><tr><td colspan="6"><div class="empty">No results found.</div></td></tr></tbody></table></div>`;
+  const t = G.parseTables(html)[0];
+  assert.equal(t.rows.length, 0);
+  const p = S.parseProfileAdvancement(`<html><body>${html}</body></html>`);
+  assert.equal(p.ledger.rows.length, 0);
+  assert.equal(p.ledger.complete, true);
+  assert.ok(!p.warnings.some((w) => /ledger row/.test(w)), p.warnings.join('; '));
+});

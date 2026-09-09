@@ -97,8 +97,16 @@ test('crossCheckEligibility: agreement is silent; AHGFamily counting pending hou
   // Pioneer 87.33 → 5 stars, 12.33 carry; Patriot 114.95 + 12.33 = 127.28 → 6 stars
   assert.deepEqual(c.levels.slice(2).map((l) => l.earnable), [5, 6]);
   assert.deepEqual(St.crossCheckEligibility(c, [{ level: 'Pioneer', starsEligible: 5 }, { level: 'Patriot', starsEligible: 6 }]), []);
-  const notes = St.crossCheckEligibility(c, [{ level: 'Patriot', starsEligible: 7 }]);
+  const notes = St.crossCheckEligibility(c, [{ level: 'Patriot', starsEligible: 7 }], { pendingByLevel: { Patriot: 1300 } });
   assert.equal(notes.length, 1);
   assert.deepEqual([notes[0].level, notes[0].ours, notes[0].theirs], ['Patriot', 6, 7]);
-  assert.match(notes[0].note, /pending/);
+  assert.match(notes[0].note, /pending .*13\.00 h/);
+  // AHGFamily carries Pathfinder hours into Tenderheart (seen live): 11 h TH + 7.5 h PF → 3 stars there, 2 here
+  const th = St.computeStarChain({ hoursByLevel: { Tenderheart: 1100 } });
+  const n2 = St.crossCheckEligibility(th, [{ level: 'Tenderheart', starsEligible: 3 }], { pathfinderHundredths: 750 });
+  assert.match(n2[0].note, /Pathfinder hours \(7\.50 h\)/);
+  // neither explanation closes the gap → a "check the read" note
+  const n3 = St.crossCheckEligibility(th, [{ level: 'Tenderheart', starsEligible: 5 }], { pathfinderHundredths: 100 });
+  assert.match(n3[0].note, /do not close the gap/);
+  assert.equal(St.sumApprovedByLevel([{ level: 'Pathfinder', hundredths: 750, verified: true }, { level: 'Pathfinder', hundredths: 100, verified: false }]).pathfinder, 750);
 });

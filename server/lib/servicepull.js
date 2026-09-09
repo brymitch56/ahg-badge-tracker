@@ -288,7 +288,9 @@ function reconcileGirl(db, girl, { fetchedLevels = STAR_LEVELS, eligibility = []
       }
     }
   }
-  out.crossCheck = stars.crossCheckEligibility(chain, eligibility).map((n) => ({ ...n, level: n.level }));
+  const pf = hoursForGirl(db, girl.id).pathfinder;
+  const pendingByLevel = Object.fromEntries(db.prepare('SELECT level, SUM(hundredths) h FROM service_hours WHERE girl_id = ? AND verified = 0 AND hundredths IS NOT NULL GROUP BY level').all(girl.id).map((r) => [r.level, r.h]));
+  out.crossCheck = stars.crossCheckEligibility(chain, eligibility, { pathfinderHundredths: pf, pendingByLevel });
   return out;
 }
 
