@@ -142,6 +142,76 @@ function eventProposals(db, event) {
  * confirmed row clears its review flag; rejecting it retracts it.
  */
 function decide(db, event, decisions, actor) {
+  return decideRows(db, decisions, actor, { eventId: event.id });
+}
+
+/**
+ * The cross-event review queue (leaders catching up after several
+ * meetings): every proposed row — plus confirmed rows flagged for review —
+ * on events that have already ended, grouped by event then girl, oldest
+ * first. `levelGroup` filters by the PLAN's level group (the unit whose
+ * plan generated the item), so a unit leader sees exactly her unit's work.
+ */
+function pendingProposals(db, { levelGroup = null, now = new Date().toISOString() } = {}) {
+  const rows = db.prepare(`
+    SELECT c.*, g.first_name, g.last_name, g.nickname, g.ahg_level,
+           r.number, r.letter, r.title, r.badge_id, b.name AS badge_name, pi.role, p.level_group,
+           e.title AS event_title, e.start_at, e.end_at
+    FROM completions c
+    JOIN girls g ON g.id = c.girl_id
+    JOIN requirements r ON r.id = c.requirement_id
+    JOIN badges b ON b.id = r.badge_id
+    JOIN events e ON e.id = c.event_id
+    LEFT JOIN plan_items pi ON pi.id = c.plan_item_id
+    LEFT JOIN plans p ON p.id = pi.plan_id
+    WHERE (c.status = 'proposed' OR (c.status = 'confirmed' AND c.needs_review = 1))
+      AND COALESCE(e.end_at, e.start_at) <= ?
+      ${levelGroup ? 'AND p.level_group = ?' : ''}
+    ORDER BY e.start_at, e.id, g.last_name, g.first_name, b.name, r.number, r.letter`).all(...(levelGroup ? [now, levelGroup] : [now]));
+  const events = new Map();
+  for (const c of rows) {
+    if (!events.has(c.event_id)) events.set(c.event_id, { eventId: c.event_id, title: c.event_title, startAt: c.start_at, endAt: c.end_at, girls: new Map(), count: 0 });
+    const ev = events.get(c.event_id);
+    if (!ev.girls.has(c.girl_id)) ev.girls.set(c.girl_id, { girlId: c.girl_id, firstName: c.first_name, lastName: c.last_name, nickname: c.nickname, ahgLevel: c.ahg_level, items: [] });
+    ev.girls.get(c.girl_id).items.push({
+      completionId: c.id,
+      levelGroup: c.level_group,
+      requirementId: c.requirement_id,
+      badgeId: c.badge_id,
+      badgeName: c.badge_name,
+      number: c.number,
+      letter: c.letter,
+      title: c.title,
+      role: c.role,
+      status: c.status,
+      completedOn: c.completed_on,
+      needsReview: !!c.needs_review,
+      reviewReason: c.review_reason,
+      participation: c.role === 'finish' ? participationFor(db, c.girl_id, c.requirement_id) : null,
+    });
+    ev.count += 1;
+  }
+  return {
+    total: rows.length,
+    levelGroups: Object.fromEntries(PLAN_GIRL_LEVELS && Object.keys(PLAN_GIRL_LEVELS).map((lg) => [lg, rows.filter((c) => c.level_group === lg).length])),
+    events: [...events.values()].map((ev) => ({ ...ev, girls: [...ev.girls.values()] })),
+  };
+}
+
+/** Cheap counts for the "waiting on you" banner (past events only). */
+function pendingCounts(db, { now = new Date().toISOString() } = {}) {
+  const completions = db.prepare(`SELECT COUNT(*) AS n FROM completions c JOIN events e ON e.id = c.event_id
+                                  WHERE (c.status = 'proposed' OR (c.status = 'confirmed' AND c.needs_review = 1))
+                                    AND COALESCE(e.end_at, e.start_at) <= ?`).get(now).n;
+  const events = db.prepare(`SELECT COUNT(DISTINCT c.event_id) AS n FROM completions c JOIN events e ON e.id = c.event_id
+                             WHERE (c.status = 'proposed' OR (c.status = 'confirmed' AND c.needs_review = 1))
+                               AND COALESCE(e.end_at, e.start_at) <= ?`).get(now).n;
+  const stars = db.prepare("SELECT COUNT(*) AS n FROM star_proposals WHERE status = 'proposed'").get().n;
+  return { completions, events, stars, total: completions + stars };
+}
+
+/** decide() without the per-event constraint — the review queue's bulk path. */
+function decideRows(db, decisions, actor, { eventId = null } = {}) {
   if (!Array.isArray(decisions) || !decisions.length) {
     throw new CompletionError(400, 'body must be [{ completionId, decision: confirm|reject, completedOn? }, …]');
   }
@@ -149,8 +219,10 @@ function decide(db, event, decisions, actor) {
     const results = [];
     for (const d of decisions) {
       if (!['confirm', 'reject'].includes(d.decision)) throw new CompletionError(400, `decision must be confirm|reject (completion ${d.completionId})`);
-      const c = db.prepare('SELECT * FROM completions WHERE id = ? AND event_id = ?').get(d.completionId, event.id);
-      if (!c) throw new CompletionError(404, `completion ${d.completionId} not found on this event`);
+      const c = eventId === null
+        ? db.prepare('SELECT * FROM completions WHERE id = ?').get(d.completionId)
+        : db.prepare('SELECT * FROM completions WHERE id = ? AND event_id = ?').get(d.completionId, eventId);
+      if (!c) throw new CompletionError(404, eventId === null ? `completion ${d.completionId} not found` : `completion ${d.completionId} not found on this event`);
       const decidable = c.status === 'proposed' || (c.status === 'confirmed' && c.needs_review);
       if (!decidable) throw new CompletionError(409, `completion ${d.completionId} is already ${c.status}`);
       if (d.completedOn !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(d.completedOn || '')) {
@@ -280,3 +352,6 @@ module.exports = {
   proposeForEvent, eventProposals, decide, manualCompletion, deleteCompletion,
   badgeStatusFor, girlProgress, badgeProgress,
 };
+
+// Review queue (cross-event catch-up) — see pendingProposals above.
+Object.assign(module.exports, { pendingProposals, pendingCounts, decideRows });

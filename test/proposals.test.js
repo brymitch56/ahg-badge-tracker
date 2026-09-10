@@ -285,3 +285,44 @@ test('scheduler: nightly/weekly cadence and the 30-min attendance sweep that sto
   assert.equal(out.attendance, undefined, 'closed again → quiet');
   sdb.close();
 });
+
+test('review queue: past events only, grouped by event/girl, level-group filter, counts, cross-event bulk decide', async () => {
+  const t = await token({ groups: [GROUP], preferred_username: 'leader@example.com' });
+  // a future meeting with a proposal must NOT count as backlog
+  const future = Number(db.prepare(
+    "INSERT INTO events (checkin_event_id, ical_uid, start_at, end_at, title, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run(9101, 'uid-future@example.com', '2099-01-01T23:00:00.000Z', '2099-01-02T00:30:00.000Z', 'Future Meeting', '2026-09-01T00:00:00Z').lastInsertRowid);
+  db.prepare("INSERT INTO completions (girl_id, requirement_id, status, event_id, source, proposed_at) VALUES (?, 'example-badge-pipa:4', 'proposed', ?, 'attendance', ?)")
+    .run(pat, future, new Date().toISOString());
+  // and a fresh past proposal for Cora on ev1 (Pioneer/Patriot plan)
+  const past = db.prepare("INSERT INTO completions (girl_id, requirement_id, status, event_id, plan_item_id, source, proposed_at) VALUES (?, 'example-badge-pipa:3', 'proposed', ?, (SELECT id FROM plan_items WHERE plan_id = (SELECT id FROM plans WHERE event_id = ? LIMIT 1) LIMIT 1), 'attendance', ?)")
+    .run(pat, ev1, ev1, new Date().toISOString()).lastInsertRowid;
+
+  const counts = await (await get('/api/v1/review/counts', t)).json();
+  assert.ok(counts.completions >= 1);
+  assert.equal(counts.total, counts.completions + counts.stars);
+  let q = await (await get('/api/v1/review', t)).json();
+  assert.ok(!q.events.some((e) => e.eventId === future), 'future meetings are not backlog');
+  const ev = q.events.find((e) => e.eventId === ev1);
+  assert.ok(ev, 'the past meeting is listed');
+  const cora = ev.girls.find((g) => g.girlId === pat);
+  const item = cora.items.find((i) => i.completionId === past);
+  assert.equal(item.levelGroup, 'Pioneer/Patriot');
+  assert.equal(q.levelGroups['Pioneer/Patriot'] >= 1, true);
+  const filtered = await (await get('/api/v1/review?levelGroup=Explorer', t)).json();
+  assert.equal(filtered.total, 0, 'no Explorer plan items are pending');
+  assert.deepEqual(await (await get('/api/v1/review?levelGroup=Pathfinder', t)).json().then((x) => x.total), 0);
+
+  // bulk decide across events, all-or-nothing, same validation as the per-event path
+  let r = await get('/api/v1/review/decide', t, { method: 'POST', body: JSON.stringify([{ completionId: past, decision: 'confirm' }, { completionId: 999999, decision: 'confirm' }]) });
+  assert.equal(r.status, 404);
+  assert.equal(db.prepare('SELECT status FROM completions WHERE id = ?').get(past).status, 'proposed', 'all-or-nothing');
+  r = await get('/api/v1/review/decide', t, { method: 'POST', body: JSON.stringify([{ completionId: past, decision: 'confirm', completedOn: '2026-09-01' }]) });
+  assert.equal(r.status, 200);
+  const c = db.prepare('SELECT * FROM completions WHERE id = ?').get(past);
+  assert.deepEqual({ status: c.status, on: c.completed_on, by: c.decided_by, level: c.level_at_completion }, { status: 'confirmed', on: '2026-09-01', by: 'leader@example.com', level: 'Patriot' });
+  q = await (await get('/api/v1/review', t)).json();
+  assert.ok(!q.events.some((e) => e.girls.some((g) => g.items.some((i) => i.completionId === past))));
+  db.prepare('DELETE FROM completions WHERE event_id = ?').run(future);
+  db.prepare('DELETE FROM events WHERE id = ?').run(future);
+});

@@ -202,6 +202,23 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
     }
   }));
 
+  // -------------------------------------------------- review queue --------
+  // Cross-event catch-up: everything waiting on a leader from meetings that
+  // have ended, filterable by the plan's level group; bulk decide.
+  api.get('/review/counts', leader, (req, res) => res.json(proposals.pendingCounts(db)));
+  api.get('/review', leader, (req, res) => {
+    const levelGroup = typeof req.query.levelGroup === 'string' && req.query.levelGroup ? req.query.levelGroup : null;
+    res.json(proposals.pendingProposals(db, { levelGroup }));
+  });
+  api.post('/review/decide', leader, (req, res) => {
+    try {
+      return res.json({ decided: proposals.decideRows(db, req.body, req.user.email) });
+    } catch (err) {
+      if (err instanceof proposals.CompletionError) return res.status(err.status).json({ error: err.message });
+      throw err;
+    }
+  });
+
   // ---------------------------------------------- proposals & completions --
   const completionErr = (res, err) => {
     if (err instanceof proposals.CompletionError) return res.status(err.status).json({ error: err.message });
