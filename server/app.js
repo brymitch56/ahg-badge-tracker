@@ -146,7 +146,9 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
     // from/to are YYYY-MM-DD; start_at is ISO-8601, so pad `to` past that day.
     const from = typeof req.query.from === 'string' ? req.query.from : '0000';
     const to = typeof req.query.to === 'string' ? `${req.query.to}T￿` : '9999';
-    const rows = db.prepare('SELECT * FROM events WHERE start_at >= ? AND start_at <= ? ORDER BY start_at').all(from, to);
+    // events gone from the feed stay listed only while they still carry plans (a leader moves or deletes those)
+    const rows = db.prepare(`SELECT * FROM events WHERE start_at >= ? AND start_at <= ?
+                             AND (removed_from_feed = 0 OR EXISTS (SELECT 1 FROM plans p WHERE p.event_id = events.id)) ORDER BY start_at`).all(from, to);
     const att = db.prepare('SELECT event_id, COUNT(*) AS total, SUM(open) AS open FROM attendance GROUP BY event_id').all();
     const plans = db.prepare('SELECT event_id, level_group FROM plans').all();
     const byEvent = new Map(att.map((a) => [a.event_id, a]));
@@ -182,6 +184,18 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
   api.put('/events/:id/plans/:levelGroup', leader, (req, res) => withEvent(req, res, (e) => {
     try {
       return res.json(plans.putPlan(db, e, req.params.levelGroup, req.body, req.user.email));
+    } catch (err) {
+      if (err instanceof plans.PlanError) return res.status(err.status).json({ error: err.message });
+      throw err;
+    }
+  }));
+
+  // Move every plan from one event to another (a renamed calendar entry).
+  api.post('/events/:id/plans/move', leader, (req, res) => withEvent(req, res, (e) => {
+    const target = db.prepare('SELECT * FROM events WHERE id = ?').get(Number((req.body || {}).toEventId));
+    if (!target) return res.status(404).json({ error: 'target event not found' });
+    try {
+      return res.json(plans.movePlans(db, e, target, req.user.email));
     } catch (err) {
       if (err instanceof plans.PlanError) return res.status(err.status).json({ error: err.message });
       throw err;

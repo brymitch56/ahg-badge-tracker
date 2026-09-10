@@ -279,4 +279,35 @@ function yearBadgeDetail(db, { badgeId, unit, from, to }) {
   return { badgeId: badge.id, name: badge.name, frontier: badge.frontier, levelGroup: badge.level_group, unit, from, to, groups };
 }
 
-module.exports = { PLAN_LEVEL_GROUPS, ROLES, badgeAllowedInPlan, PlanError, getPlans, putPlan, yearOverview, yearBadgeDetail };
+/**
+ * Move every plan on one event to another. A calendar entry that is
+ * renamed or re-saved gets a NEW iCal identity, so the check-in app and
+ * this mirror see a new event while the plans stay on the old row. Plan
+ * items follow their plan; completions and participation pointing at the
+ * old event follow too. A level group the target already plans is left
+ * behind (reported in `skipped`) for a human to merge by hand.
+ */
+function movePlans(db, fromEvent, toEvent, actor) {
+  if (!fromEvent || !toEvent) throw new PlanError(404, 'event not found');
+  if (fromEvent.id === toEvent.id) throw new PlanError(400, 'source and target are the same event');
+  const at = new Date().toISOString();
+  const rows = db.prepare('SELECT * FROM plans WHERE event_id = ? ORDER BY level_group').all(fromEvent.id);
+  const moved = [];
+  const skipped = [];
+  const run = db.transaction(() => {
+    for (const plan of rows) {
+      if (db.prepare('SELECT 1 FROM plans WHERE event_id = ? AND level_group = ?').get(toEvent.id, plan.level_group)) { skipped.push(plan.level_group); continue; }
+      db.prepare('UPDATE plans SET event_id = ? WHERE id = ?').run(toEvent.id, plan.id);
+      db.prepare('UPDATE completions SET event_id = ? WHERE event_id = ? AND plan_item_id IN (SELECT id FROM plan_items WHERE plan_id = ?)').run(toEvent.id, fromEvent.id, plan.id);
+      db.prepare('UPDATE participation SET event_id = ? WHERE event_id = ? AND plan_item_id IN (SELECT id FROM plan_items WHERE plan_id = ?)').run(toEvent.id, fromEvent.id, plan.id);
+      db.prepare('INSERT INTO audit_log (at, actor, action, entity, entity_id, before, after) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(at, actor, 'plan.move', 'plan', `${toEvent.id}:${plan.level_group}`,
+          JSON.stringify({ eventId: fromEvent.id, title: fromEvent.title }), JSON.stringify({ eventId: toEvent.id, title: toEvent.title }));
+      moved.push(plan.level_group);
+    }
+  });
+  run();
+  return { moved, skipped };
+}
+
+module.exports = { PLAN_LEVEL_GROUPS, ROLES, badgeAllowedInPlan, PlanError, getPlans, putPlan, movePlans, yearOverview, yearBadgeDetail };

@@ -237,3 +237,28 @@ test('routes: POST /sync/checkin (admin) full refresh; /sync/status; /health che
   assert.ok(status.webhookDeliveries >= 1);
   assert.equal((await (await fetch(base + '/health')).json()).checkin, 'ok');
 });
+
+test('syncEvents: a renamed feed entry (new ical uid) marks the old event removed and moves its plans to the same-time twin', async () => {
+  // the meeting at 42 gets renamed on the calendar → a NEW uid and id; 42 vanishes from the feed
+  const old = db.prepare('SELECT * FROM events WHERE checkin_event_id = 42').get();
+  db.prepare("INSERT INTO plans (event_id, level_group, created_by, created_at) VALUES (?, 'Explorer', 'leader@example.com', '2026-09-01T00:00:00Z')").run(old.id);
+  const renamed = { ...state.events[0], id: 99, ical_uid: 'uid-meeting-1-renamed@example.com', title: 'Service Hour Meeting' };
+  const original = state.events[0];
+  state.events[0] = renamed;
+  const s = await mirror.syncEvents(db, client);
+  assert.deepEqual({ removed: s.removed, plansMoved: s.plansMoved, created: s.created }, { removed: 1, plansMoved: 1, created: 1 });
+  const twin = db.prepare('SELECT * FROM events WHERE checkin_event_id = 99').get();
+  assert.equal(db.prepare('SELECT removed_from_feed FROM events WHERE id = ?').get(old.id).removed_from_feed, 1);
+  assert.equal(db.prepare('SELECT event_id FROM plans WHERE level_group = ?').get('Explorer').event_id, twin.id, 'plans followed the meeting');
+  assert.ok(db.prepare("SELECT 1 FROM audit_log WHERE action = 'plan.move' AND actor = 'system'").get());
+  // idempotent: a second sync changes nothing
+  const s2 = await mirror.syncEvents(db, client);
+  assert.deepEqual({ removed: s2.removed, plansMoved: s2.plansMoved }, { removed: 0, plansMoved: 0 });
+  // an absent event WITHOUT plans is just marked; a removed event with two same-time twins is left for a human
+  state.events[0] = original; // restore the fixture for later tests
+  db.prepare('DELETE FROM plans WHERE event_id = ?').run(twin.id);
+  db.prepare('DELETE FROM events WHERE id = ?').run(twin.id);
+  db.prepare('UPDATE events SET removed_from_feed = 0 WHERE id = ?').run(old.id);
+  await mirror.syncEvents(db, client);
+  assert.equal(db.prepare('SELECT removed_from_feed FROM events WHERE id = ?').get(old.id).removed_from_feed, 0);
+});

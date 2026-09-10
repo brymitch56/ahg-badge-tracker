@@ -231,3 +231,34 @@ test('year badge detail: sessions listed, gaps split required vs optional, met n
   assert.equal((await get('/api/v1/progress/year/badge?badgeId=nope&unit=Explorer&from=2026-09-01&to=2027-08-31', t)).status, 404);
   assert.equal((await get('/api/v1/progress/year/badge?badgeId=example-badge-pipa&unit=Pathfinders&from=2026-09-01&to=2027-08-31', t)).status, 400);
 });
+
+test('POST /events/:id/plans/move: plans (and their items) move to the target; a level group already planned there is skipped', async () => {
+  const t = await token({ groups: [GROUP], preferred_username: 'leader@example.com' });
+  const target = Number(db.prepare("INSERT INTO events (checkin_event_id, ical_uid, start_at, end_at, title, updated_at) VALUES (77, 'uid-meeting-1-renamed@example.com', '2026-09-01T23:00:00.000Z', '2026-09-02T00:30:00.000Z', 'Renamed Meeting', '2026-09-01T00:00:00Z')").run().lastInsertRowid);
+  // make sure the event carries plans for two level groups (earlier tests may have deleted one)
+  for (const [lg, req] of [['Explorer', 'other-badge-expl:1'], ['Pioneer/Patriot', 'example-badge-pipa:1']]) {
+    if (!db.prepare('SELECT 1 FROM plans WHERE event_id = ? AND level_group = ?').get(eventId, lg)) {
+      assert.equal((await put(`/api/v1/events/${eventId}/plans/${lg}`, t, { items: [{ requirementId: req, role: 'session' }] })).status, 200);
+    }
+  }
+  const before = db.prepare('SELECT level_group FROM plans WHERE event_id = ? ORDER BY level_group').all(eventId).map((p) => p.level_group);
+  assert.equal(before.length, 2);
+  const itemsBefore = db.prepare('SELECT COUNT(*) AS n FROM plan_items pi JOIN plans p ON p.id = pi.plan_id WHERE p.event_id = ? AND p.level_group = ?').get(eventId, before[1]).n;
+  // pre-plan one of those level groups on the target so it must be skipped
+  db.prepare("INSERT INTO plans (event_id, level_group, created_by, created_at) VALUES (?, ?, 'leader@example.com', '2026-09-01T00:00:00Z')").run(target, before[0]);
+  let r = await get(`/api/v1/events/${eventId}/plans/move`, t, { method: 'POST', body: JSON.stringify({ toEventId: 424242 }) });
+  assert.equal(r.status, 404);
+  r = await get(`/api/v1/events/${eventId}/plans/move`, t, { method: 'POST', body: JSON.stringify({ toEventId: eventId }) });
+  assert.equal(r.status, 400);
+  r = await get(`/api/v1/events/${eventId}/plans/move`, t, { method: 'POST', body: JSON.stringify({ toEventId: target }) });
+  assert.equal(r.status, 200);
+  const out = await r.json();
+  assert.deepEqual(out.skipped, [before[0]]);
+  assert.deepEqual(out.moved, before.slice(1));
+  assert.deepEqual(db.prepare('SELECT level_group FROM plans WHERE event_id = ? ORDER BY level_group').all(eventId).map((p) => p.level_group), [before[0]]);
+  const movedPlans = await (await get(`/api/v1/events/${target}/plans`, t)).json();
+  const movedPlan = movedPlans.find((p) => p.levelGroup === before[1]);
+  assert.ok(movedPlan, 'the moved level group is on the target');
+  assert.equal(movedPlan.items.length, itemsBefore, 'items came along (however many there were)');
+  assert.ok(db.prepare("SELECT 1 FROM audit_log WHERE action = 'plan.move' AND actor = 'leader@example.com'").get());
+});

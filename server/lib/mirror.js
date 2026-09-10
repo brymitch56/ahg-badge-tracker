@@ -75,7 +75,24 @@ async function syncEvents(db, client, { from, to } = {}) {
     const rows = await client.events({ from, to });
     let created = 0;
     for (const ev of rows) if (upsertEvent(db, ev).created) created += 1;
-    return { from, to, fetched: rows.length, created, updated: rows.length - created };
+    // Absences: a mirrored event inside the fetched window that the check-in
+    // app no longer lists is gone from the feed (a renamed or re-saved
+    // calendar entry gets a NEW iCal identity, so it reappears as a
+    // different event). Mark it; when exactly one live event shares its
+    // start time, move its plans there — same meeting, new name.
+    const seen = new Set(rows.map((ev) => ev.id));
+    const stale = db.prepare(`SELECT * FROM events WHERE checkin_event_id IS NOT NULL AND removed_from_feed = 0
+                              AND start_at >= ? AND start_at < ?`).all(from, `${to}T￿`)
+      .filter((e) => !seen.has(e.checkin_event_id));
+    let plansMoved = 0;
+    const plans = require('./plans'); // lazy, keeps any future import cycle impossible
+    for (const e of stale) {
+      db.prepare('UPDATE events SET removed_from_feed = 1, updated_at = ? WHERE id = ?').run(now(), e.id);
+      if (!db.prepare('SELECT 1 FROM plans WHERE event_id = ?').get(e.id)) continue;
+      const twins = db.prepare('SELECT * FROM events WHERE id <> ? AND removed_from_feed = 0 AND start_at = ?').all(e.id, e.start_at);
+      if (twins.length === 1) plansMoved += plans.movePlans(db, e, twins[0], 'system').moved.length;
+    }
+    return { from, to, fetched: rows.length, created, updated: rows.length - created, removed: stale.length, plansMoved };
   });
 }
 
