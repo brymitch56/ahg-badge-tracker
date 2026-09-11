@@ -92,10 +92,16 @@ copyright rule). Then this file, then `docs/tracker-service-spec.md`
    nobody is owed a star today; 0 conflicts; no latch). Profile access
    under the pull account covers every mapped girl; ledger headers and
    single-page ledgers parsed as designed (no girl needed paging yet — the
-   pager-following path is still only fixture-tested). The awards grid on
-   the profile page did NOT parse (`awards grid not found` — informational;
-   stars on record come from the verified Standard fragments), so a
-   session with a saved profile capture could fix its header/ids later.
+   pager-following path is still only fixture-tested). ~~The awards grid on
+   the profile page did NOT parse~~ — **stale: re-checked live 2026-09-11
+   with the deployed code on three profiles: `parseProfileAdvancement`
+   returned zero warnings, awards grids complete with `aw…`/`ad…` ids on
+   every row, youth ids matching.** One cosmetic gap: the live Progress cell
+   parses as `{done:100,total:100,pct:null}` (it evidently renders as
+   `100/100`, not the `1/1100%` shape the fixture assumes). Nothing reads
+   `progress` for a decision; capture the raw cell in the step 5 session and
+   align `parseProgress` + the fixture then. Step 5 itself is now scripted
+   as `docs/step5-verification-session.md` — supervised, one real save.
    **Finding for Bryan/the coordinator:** AHGFamily's own `Stars Eligible`
    carries approved Pathfinder hours into Tenderheart (4 girls, gaps of 1–2
    stars each, exactly explained), and the 6 "legacy" baselines are those
