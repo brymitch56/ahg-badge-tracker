@@ -16,18 +16,21 @@ const proposals = require('./proposals');
 const mapping = require('./mapping');
 const ahgpull = require('./ahgpull');
 const servicepull = require('./servicepull');
+const servicepush = require('./servicepush');
+const report = require('./report');
 const { getSetting, setSetting } = require('./settings');
 const { CheckinError } = require('./checkin');
 
 const EVENTS_EVERY_MS = 24 * 3600e3;      // nightly
 const PEOPLE_EVERY_MS = 7 * 24 * 3600e3;  // weekly
 const PULL_EVERY_MS = 7 * 24 * 3600e3;    // weekly (spec §7, decided)
+const PUSH_EVERY_MS = 7 * 24 * 3600e3;    // weekly push (spec §7, decided; only while push_enabled)
 const BACKUP_EVERY_MS = 24 * 3600e3;      // nightly
 const BACKUPS_KEPT = 14;
 const SWEEP_DELAY_MS = 30 * 60e3;         // 30 min after end_at
 const SWEEP_WINDOW_MS = 7 * 24 * 3600e3;  // stop chasing week-old events
 
-function makeScheduler({ cfg, db, client, credKey = null, ahgSessionFactory = undefined, log = (m) => console.log(m) }) {
+function makeScheduler({ cfg, db, client, credKey = null, ahgSessionFactory = undefined, mailer = undefined, log = (m) => console.log(m) }) {
   async function tick(nowMs = Date.now()) {
     const out = {};
     const lastOk = (kind) => db.prepare('SELECT started_at FROM sync_runs WHERE kind = ? AND ok = 1 ORDER BY id DESC LIMIT 1').get(kind);
@@ -75,6 +78,24 @@ function makeScheduler({ cfg, db, client, credKey = null, ahgSessionFactory = un
         log(`[tracker] weekly Service Stars pull failed: ${e.message}`);
         out.serviceError = e.message;
       }
+    }
+
+    // Weekly AHGFamily push (spec §7, decided) — only while an admin has the
+    // push_enabled flag on; the requirement push additionally needs its own
+    // flag. One run report is mailed afterwards (report_mode decides when).
+    if (servicepush.pushEnabled(db) && age(lastOk('push')) >= PUSH_EVERY_MS && !mapping.getLatch(db) && mapping.hasStoredCredentials(db, credKey)
+        && db.prepare("SELECT 1 FROM push_queue WHERE status = 'queued' LIMIT 1").get()) {
+      const opts = { ...(ahgSessionFactory ? { sessionFactory: ahgSessionFactory } : {}), key: credKey };
+      try {
+        out.push = await servicepush.pushStarInstances(db, cfg, opts);
+        if (!mapping.getLatch(db)) out.pushRequirements = await servicepush.pushRequirementMarks(db, cfg, opts);
+      } catch (e) {
+        log(`[tracker] weekly AHGFamily push failed: ${e.message}`);
+        out.pushError = e.message;
+      }
+      try {
+        out.report = await report.sendPushReport(db, cfg, { stars: out.push || null, requirements: out.pushRequirements || null }, { ...(mailer ? { mailer } : {}), trigger: 'weekly', log });
+      } catch (e) { log(`[tracker] push report failed: ${e.message}`); }
     }
 
     if (!client.configured) return Object.keys(out).length ? out : { skipped: 'checkin unconfigured' };

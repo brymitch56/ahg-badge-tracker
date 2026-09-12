@@ -50,13 +50,17 @@ data-changing and are never called anywhere.
 
 `POST /advancement/index` (the Standard-view save) is the **one** write the
 project makes, and it lives in exactly one audited place:
-`server/lib/servicepush.js` (step 7, the Service Star push), reached only
-through `lib/ahgfamily.js`'s `postAdvancementIndex` — which is deliberately
-**not** in the read-only allow-list, so `request()` still refuses a write
-everywhere else. It ships behind the `push_enabled` setting (default off),
-is admin-only and manual, never retries an unconfirmed save, and latches on
-auth failure like every other AHGFamily call. Do not widen this: no other
-module may write, and a catalog/fetch script never writes.
+`server/lib/servicepush.js` (step 7 — Service Star instances, and
+requirement marks with their notes), reached only through
+`lib/ahgfamily.js`'s `postAdvancementIndex` — which is deliberately **not**
+in the read-only allow-list, so `request()` still refuses a write everywhere
+else. It ships behind the `push_enabled` setting (default off; the
+requirement push needs `push_requirements_enabled` as well, off until
+`docs/step5b-requirement-write-verification.md` has run), is admin-only
+("Push now") or weekly from the scheduler while the flag is on, never
+retries an unconfirmed save, and latches on auth failure like every other
+AHGFamily call. Do not widen this: no other module may write, and a
+catalog/fetch script never writes.
 
 Auth failures are terminal: exit immediately, never retry in a loop
 (AHGFamily may lock the account). Throttle every request (~300 ms).

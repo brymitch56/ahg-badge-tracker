@@ -15,12 +15,13 @@ const proposals = require('./lib/proposals');
 const ahgpull = require('./lib/ahgpull');
 const servicepull = require('./lib/servicepull');
 const servicepush = require('./lib/servicepush');
+const report = require('./lib/report');
 const access = require('./lib/access');
 
 let VERSION = null;
 try { VERSION = require(path.join(__dirname, '..', 'package.json')).version; } catch { /* stripped install */ }
 
-function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefined, ahgFetchHtml = undefined, ahgSessionFactory = undefined }) {
+function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefined, ahgFetchHtml = undefined, ahgSessionFactory = undefined, mailer = undefined }) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 1); // Cloudflare tunnel in front
@@ -209,11 +210,11 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
   api.get('/review/counts', leader, (req, res) => res.json(proposals.pendingCounts(db)));
   api.get('/review', leader, (req, res) => {
     const levelGroup = typeof req.query.levelGroup === 'string' && req.query.levelGroup ? req.query.levelGroup : null;
-    res.json(proposals.pendingProposals(db, { levelGroup }));
+    res.json(proposals.pendingProposals(db, { levelGroup, tz: cfg.tz }));
   });
   api.post('/review/decide', leader, (req, res) => {
     try {
-      return res.json({ decided: proposals.decideRows(db, req.body, req.user.email) });
+      return res.json({ decided: proposals.decideRows(db, req.body, req.user.email, { tz: cfg.tz }) });
     } catch (err) {
       if (err instanceof proposals.CompletionError) return res.status(err.status).json({ error: err.message });
       throw err;
@@ -225,10 +226,10 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
     if (err instanceof proposals.CompletionError) return res.status(err.status).json({ error: err.message });
     throw err;
   };
-  api.get('/events/:id/proposals', leader, (req, res) => withEvent(req, res, (e) => res.json(proposals.eventProposals(db, e))));
+  api.get('/events/:id/proposals', leader, (req, res) => withEvent(req, res, (e) => res.json(proposals.eventProposals(db, e, { tz: cfg.tz }))));
   api.post('/events/:id/proposals/decide', leader, (req, res) => withEvent(req, res, (e) => {
     try {
-      return res.json({ decided: proposals.decide(db, e, req.body, req.user.email) });
+      return res.json({ decided: proposals.decide(db, e, req.body, req.user.email, { tz: cfg.tz }) });
     } catch (err) { return completionErr(res, err); }
   }));
   api.post('/completions', leader, (req, res) => {
@@ -293,6 +294,9 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
       queue: Object.fromEntries(db.prepare('SELECT status, COUNT(*) AS n FROM push_queue GROUP BY status').all().map((r) => [r.status, r.n])),
       openConflicts: db.prepare("SELECT COUNT(*) AS n FROM conflicts WHERE status = 'open'").get().n,
       pushEnabled: servicepush.pushEnabled(db),
+      pushRequirementsEnabled: servicepush.pushRequirementsEnabled(db),
+      reportMode: report.reportMode(db),
+      mailConfigured: !!(cfg.mail && cfg.mail.smtpUrl && cfg.mail.from && cfg.mail.to.length),
     });
   });
 
@@ -342,23 +346,32 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
   // Ships OFF. Writing to AHGFamily requires an admin to flip push_enabled,
   // and is manual-only ("Push now"). servicepush is the one module that writes.
   api.post('/sync/push', admin, async (req, res) => {
+    const opts = { ...(ahgSessionFactory ? { sessionFactory: ahgSessionFactory } : {}), key: credKey(), actor: req.user.email };
     try {
-      res.json(await servicepush.pushStarInstances(db, cfg, {
-        ...(ahgSessionFactory ? { sessionFactory: ahgSessionFactory } : {}), key: credKey(), actor: req.user.email,
-      }));
+      const stars = await servicepush.pushStarInstances(db, cfg, opts);
+      const requirements = mapping.getLatch(db) ? null : await servicepush.pushRequirementMarks(db, cfg, opts);
+      const sent = await report.sendPushReport(db, cfg, { stars, requirements }, { ...(mailer ? { mailer } : {}), trigger: 'manual', actor: req.user.email });
+      res.json({ ...stars, requirements, report: sent });
     } catch (e) {
-      if (e instanceof ahgpull.PullError) return pullErr(res, e, db);
+      if (e instanceof ahgpull.PullError) {
+        try { await report.sendPushReport(db, cfg, { stars: { skipped: e.message } }, { ...(mailer ? { mailer } : {}), trigger: 'manual', actor: req.user.email }); } catch { /* report is best effort */ }
+        return pullErr(res, e, db);
+      }
       console.error('[tracker] push failed:', e);
       return res.status(502).json({ error: 'push failed', detail: e.message });
     }
     return undefined;
   });
-  api.post('/admin/push-enabled', admin, (req, res) => {
-    const on = servicepush.setPushEnabled(db, req.body && req.body.enabled === true, req.user.email);
+  const flagRoute = (path, setter, key) => api.post(path, admin, (req, res) => {
+    const on = setter(db, req.body && req.body.enabled === true, req.user.email);
     db.prepare('INSERT INTO audit_log (at, actor, action, entity, entity_id, before, after) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(new Date().toISOString(), req.user.email, 'push.enabled', 'settings', 'push_enabled', null, JSON.stringify({ enabled: on }));
-    res.json({ pushEnabled: on });
+      .run(new Date().toISOString(), req.user.email, `${key}.set`, 'settings', key, null, JSON.stringify({ enabled: on }));
+    res.json({ [key === 'push_enabled' ? 'pushEnabled' : 'pushRequirementsEnabled']: on });
   });
+  flagRoute('/admin/push-enabled', servicepush.setPushEnabled, 'push_enabled');
+  flagRoute('/admin/push-requirements-enabled', servicepush.setPushRequirementsEnabled, 'push_requirements_enabled');
+  api.post('/admin/report-mode', admin, (req, res) => res.json({ reportMode: report.setReportMode(db, req.body && req.body.mode, req.user.email) }));
+  api.get('/sync/push-report', leader, (req, res) => res.json(report.lastPushReport(db) || null));
   api.get('/stars', leader, (req, res) => res.json(servicepull.listStars(db, { girlId: req.query.girlId ? Number(req.query.girlId) : null })));
   api.get('/stars/proposals', leader, (req, res) => res.json(servicepull.listStarProposals(db, { all: req.query.all === '1' })));
   api.post('/stars/proposals/decide', leader, (req, res) => {

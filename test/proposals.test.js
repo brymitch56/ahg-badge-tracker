@@ -134,7 +134,65 @@ test('finish proposal carries the participation count', async () => {
   const item = view.girls[0].items[0];
   assert.equal(item.role, 'finish');
   assert.equal(item.completedOn, '2026-09-08');
-  assert.deepEqual(item.participation, { count: 1, planned: 1 }, 'present for 1 of the 1 planned session');
+  assert.deepEqual({ count: item.participation.count, planned: item.participation.planned, missed: item.participation.missed }, { count: 1, planned: 1, missed: [] }, 'present for 1 of the 1 planned session');
+  assert.equal(item.participation.sessions.length >= 2, true, 'the start meeting and the finish meeting are both listed');
+  assert.equal(item.participation.sessions.every((s) => s.attended), true);
+});
+
+test('missed segment: finish row lists the missed date; confirm needs verified:true; note carries only her dates + the verification', async () => {
+  // Own database + app so this scenario cannot disturb the fixtures above.
+  const { requirementNote } = require('../server/lib/reqnote');
+  const sdb = openDb(':memory:');
+  migrate(sdb);
+  catalog.importFromDir(sdb, badgesDir, { actor: 'admin@example.com' });
+  const girl = (first, last, level) => Number(sdb.prepare('INSERT INTO girls (first_name, last_name, level, ahg_level, active, updated_at) VALUES (?, ?, ?, ?, 1, ?)').run(first, last, level, level, new Date().toISOString()).lastInsertRowid);
+  const event = (id, startAt, endAt, title) => Number(sdb.prepare("INSERT INTO events (checkin_event_id, ical_uid, start_at, end_at, title, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, `uid-${id}@example.com`, startAt, endAt, title, new Date().toISOString()).lastInsertRowid);
+  const attend = (eventId, girlId) => sdb.prepare("INSERT INTO attendance (event_id, girl_id, signed_in_at, signed_out_at, open, source_txn_ids, fetched_at) VALUES (?, ?, '2026-09-01T23:02:00.000Z', '2026-09-02T00:31:00.000Z', 0, '[1]', ?)").run(eventId, girlId, new Date().toISOString());
+  const ev = (id) => sdb.prepare('SELECT * FROM events WHERE id = ?').get(id);
+  const eve = girl('Eve', 'Dean', 'Patriot');   // skips Meeting One, at Meeting Two
+  const fay = girl('Fay', 'Ellis', 'Pioneer');  // at both
+  const gwen = girl('Gwen', 'Fox', 'Explorer'); // home completion
+  const m1 = event(101, '2026-09-01T23:00:00.000Z', '2026-09-02T00:30:00.000Z', 'Meeting One');
+  const m2 = event(102, '2026-09-08T23:00:00.000Z', '2026-09-09T00:30:00.000Z', 'Meeting Two');
+  plans.putPlan(sdb, ev(m1), 'Pioneer/Patriot', { notes: 'Intro night', items: [{ requirementId: 'example-badge-pipa:2', role: 'start', notes: 'Chose a topic' }] }, 'leader@example.com');
+  plans.putPlan(sdb, ev(m2), 'Pioneer/Patriot', { items: [{ requirementId: 'example-badge-pipa:2', role: 'finish', notes: 'Presented it' }] }, 'leader@example.com');
+  attend(m2, eve); attend(m1, fay); attend(m2, fay);
+  proposals.proposeForEvent(sdb, ev(m1), TZ);
+  proposals.proposeForEvent(sdb, ev(m2), TZ);
+  const app2 = createApp({ cfg, db: sdb, jwks });
+  const srv = await new Promise((r) => { const s = app2.listen(0, '127.0.0.1', () => r(s)); });
+  const b2 = `http://127.0.0.1:${srv.address().port}`;
+  const t = await token({ groups: [GROUP], preferred_username: 'leader@example.com' });
+  const call = (p, init = {}) => fetch(b2 + p, { ...init, headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' } });
+  try {
+    const view = await (await call(`/api/v1/events/${m2}/proposals`)).json();
+    const item = view.girls.find((g) => g.girlId === eve).items[0];
+    assert.deepEqual({ count: item.participation.count, planned: item.participation.planned, missed: item.participation.missed }, { count: 0, planned: 1, missed: ['2026-09-01'] });
+    assert.deepEqual(item.participation.sessions.map((s) => [s.localDate, s.attended]), [['2026-09-01', false], ['2026-09-08', true]]);
+    // confirm without the leader's word → refused, row untouched
+    let r = await call('/api/v1/review/decide', { method: 'POST', body: JSON.stringify([{ completionId: item.completionId, decision: 'confirm' }]) });
+    assert.equal(r.status, 409);
+    assert.match((await r.json()).error, /2026-09-01 were missed .* verified: true/);
+    assert.equal(sdb.prepare('SELECT status FROM completions WHERE id = ?').get(item.completionId).status, 'proposed');
+    // with it → confirmed, verification recorded
+    r = await call('/api/v1/review/decide', { method: 'POST', body: JSON.stringify([{ completionId: item.completionId, decision: 'confirm', verified: true, note: 'Did the first part at home with her mom' }]) });
+    assert.equal(r.status, 200);
+    const c = sdb.prepare('SELECT * FROM completions WHERE id = ?').get(item.completionId);
+    const v = JSON.parse(c.verification);
+    assert.deepEqual({ status: c.status, missed: v.missed, note: v.note, by: v.verifiedBy }, { status: 'confirmed', missed: ['2026-09-01'], note: 'Did the first part at home with her mom', by: 'leader@example.com' });
+    // her note: attended date(s) with that meeting's notes, NOT the missed one, plus the verification line
+    const note = requirementNote(sdb, c, { tz: TZ });
+    assert.match(note, /^tracker: 09\/08\/2026 Meeting Two — Presented it \| Leader verified full completion \(missed planned session 09\/01\/2026\): Did the first part at home with her mom — leader@example\.com, \d{2}\/\d{2}\/\d{4}$/);
+    assert.equal(note.includes('Meeting One'), false, 'a missed meeting is not in her note');
+    // Fay attended both: both dates, item notes first, no verification line, and confirm needs no verified flag
+    const fayRow = sdb.prepare("SELECT * FROM completions WHERE girl_id = ?").get(fay);
+    r = await call('/api/v1/review/decide', { method: 'POST', body: JSON.stringify([{ completionId: fayRow.id, decision: 'confirm' }]) });
+    assert.equal(r.status, 200);
+    assert.equal(requirementNote(sdb, fayRow, { tz: TZ }), 'tracker: 09/01/2026 Meeting One — Chose a topic | 09/08/2026 Meeting Two — Presented it');
+    // a home completion
+    const manual = proposals.manualCompletion(sdb, { girlId: gwen, requirementId: 'example-badge-pipa:4', completedOn: '2026-08-20', notes: 'Photos of the project' }, 'leader@example.com');
+    assert.equal(requirementNote(sdb, manual, { tz: TZ }), 'tracker: Completed at home 08/20/2026 — Photos of the project');
+  } finally { srv.close(); sdb.close(); }
 });
 
 test('rule 5: un-attended girl loses proposed rows and participation; confirmed rows are flagged, never reverted', async () => {

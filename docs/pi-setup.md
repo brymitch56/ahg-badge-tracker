@@ -43,6 +43,7 @@ their history).
 | `CHECKIN_API_KEY` | from the check-in app, step 4 |
 | `CHECKIN_WEBHOOK_SECRET` | from the check-in app, step 4 |
 | `SITE_ORIGIN` | the website origin (CORS) — set with Entra, step 6 |
+| `SMTP_URL`, `REPORT_FROM`, `REPORT_EMAILS` | the push run report mail (after every AHGFamily push — weekly or "Push now"). `SMTP_URL` is a nodemailer URL (e.g. `smtps://user%40example.org:app-password@smtp.office365.com:465`); all three must be set or the report is only kept on the admin page. Optional. |
 | `MSAL_TENANT_ID` / `MSAL_CLIENT_ID` | from `docs/entra-setup.md`, step 6 |
 | `LEADER_GROUP_ID` or `LEADER_EMAILS`, `ADMIN_EMAILS` | step 6 — the BOOTSTRAP list only; day-to-day leader/admin management happens on the website Admin page (stored in tracker.db, merged with these; `.env` entries can never be removed from the UI, so they are the lockout-recovery hatch) |
 

@@ -211,4 +211,147 @@ async function pushStarInstances(db, cfg, { sessionFactory = ahgpull.makeLiveSes
   });
 }
 
-module.exports = { pushStarInstances, pushEnabled, setPushEnabled, toFormDate, serializeForm, panelPairsWithStar };
+// ======================================================================
+// Requirement marks with notes (the `mark` queue rows ahgpull's reconcile
+// creates for "confirmed here, not on AHGFamily"). Same vehicle as the star
+// push — the full Standard-view save — with the requirement's own three
+// fields set: `checkbox-<reqId>` (checked), `date-<reqId>`, and
+// `comment-<reqId>` = the note from lib/reqnote (attended dates + plan
+// notes + the leader's verification). Everything else on the form is
+// echoed byte-for-byte. Gated by ITS OWN flag on top of push_enabled,
+// because the per-requirement save has not yet been watched live
+// (docs/step5b-requirement-write-verification.md).
+const REQ_SETTING = 'push_requirements_enabled';
+const pushRequirementsEnabled = (db) => getSetting(db, REQ_SETTING) === true;
+const setPushRequirementsEnabled = (db, on, actor) => { setSetting(db, REQ_SETTING, !!on, actor); return !!on; };
+
+// Browser-faithful pairs for a whole fragment, with `check` names forced
+// on (contributing the input's own value, or "on") and `set` overrides.
+function fragmentPairs(html, { check = [], set = {} } = {}) {
+  const pairs = [];
+  const re = /<(input|textarea|select)\b([^>]*)>(?:([\s\S]*?)<\/\1\s*>)?/gi;
+  let m;
+  while ((m = re.exec(html))) {
+    const attrs = Object.fromEntries([...m[2].matchAll(/([a-zA-Z_:-]+)(?:="([^"]*)")?/g)].map((x) => [x[1], x[2] === undefined ? '' : A.decodeHtml(x[2])]));
+    const name = (attrs.name || '').trim();
+    if (!name || 'disabled' in attrs) continue;
+    const tag = m[1].toLowerCase();
+    const type = (attrs.type || 'text').toLowerCase();
+    if (tag === 'input') {
+      if (['submit', 'button', 'file', 'image', 'reset'].includes(type)) continue;
+      if (type === 'checkbox' || type === 'radio') {
+        if (!('checked' in attrs) && !check.includes(name)) continue;
+        pairs.push([name, attrs.value === undefined ? 'on' : attrs.value]);
+      } else {
+        pairs.push([name, attrs.value === undefined ? '' : attrs.value]);
+      }
+    } else if (tag === 'textarea') {
+      pairs.push([name, A.decodeHtml(m[3] || '')]);
+    } else {
+      const opts = [...(m[3] || '').matchAll(/<option\b([^>]*)>/gi)]
+        .map((o) => Object.fromEntries([...o[1].matchAll(/([a-zA-Z_:-]+)(?:="([^"]*)")?/g)].map((x) => [x[1], x[2] === undefined ? '' : A.decodeHtml(x[2])])));
+      const sel = opts.filter((o) => 'selected' in o);
+      const chosen = sel.length ? sel : (('multiple' in attrs) || !opts.length ? [] : [opts[0]]);
+      for (const o of chosen) pairs.push([name, o.value || '']);
+    }
+  }
+  for (const [name, value] of Object.entries(set)) {
+    const i = pairs.findIndex(([n]) => n === name);
+    if (i >= 0) pairs[i] = [name, value]; else pairs.push([name, value]);
+  }
+  return pairs;
+}
+
+const itemSig = (state, except = null) => Object.entries(state.items)
+  .filter(([id]) => id !== except).map(([id, it]) => [id, !!it.checked, it.date || null, it.comment || null])
+  .sort((a, b) => (a[0] < b[0] ? -1 : 1));
+
+async function pushRequirementMarks(db, cfg, { sessionFactory = ahgpull.makeLiveSession, key = null, env = process.env, actor = 'system', limit = 50 } = {}) {
+  if (!pushEnabled(db)) return { skipped: 'push disabled', pushed: 0, held: 0, failed: 0, skippedRows: 0 };
+  if (!pushRequirementsEnabled(db)) return { skipped: 'requirement push disabled', pushed: 0, held: 0, failed: 0, skippedRows: 0 };
+  const latch = mapping.getLatch(db);
+  if (latch) throw new PullError('latched', `AHGFamily is latched since ${latch.latchedAt} (${latch.error}) — re-enter credentials to clear`);
+  if (!mapping.hasStoredCredentials(db, key)) throw new PullError('noconfig', 'no AHGFamily credentials — enter them via the admin screen');
+  const { requirementNote } = require('./reqnote');
+
+  const rows = db.prepare(`SELECT q.*, r.ahg_requirement_id, r.number, r.letter, b.ahg_award_id AS award_id, b.name AS badge_name
+                           FROM push_queue q JOIN requirements r ON r.id = q.requirement_id JOIN badges b ON b.id = r.badge_id
+                           WHERE q.action = 'mark' AND q.status = 'queued' ORDER BY q.girl_id, q.badge_id, q.id LIMIT ?`).all(limit);
+
+  return recordRun(db, 'push', async () => {
+    const summary = { action: 'mark', queued: rows.length, pushed: 0, held: 0, failed: 0, skippedRows: 0, items: [], warnings: [] };
+    if (!rows.length) return summary;
+    let session;
+    try {
+      session = await sessionFactory(db, { key, env });
+    } catch (e) {
+      if (e instanceof A.FetchError && e.code === A.EXIT.AUTH) {
+        mapping.setLatch(db, e.message);
+        throw new PullError('latched', `AHGFamily login failed — latched all AHGFamily traffic (${e.message})`);
+      }
+      throw e;
+    }
+    const runId = db.prepare('SELECT MAX(id) AS id FROM sync_runs').get().id;
+    const finish = (row, status, lastError) => {
+      db.prepare('UPDATE push_queue SET status = ?, attempts = attempts + 1, last_error = ?, sent_at = ?, sync_run_id = ? WHERE id = ?')
+        .run(status, lastError || null, status === 'sent' ? now() : null, runId, row.id);
+      db.prepare('INSERT INTO audit_log (at, actor, action, entity, entity_id, before, after) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(now(), actor, `push.mark.${status}`, 'push_queue', String(row.id), JSON.stringify({ status: 'queued' }),
+          JSON.stringify({ status, girlId: row.girl_id, requirementId: row.requirement_id, error: lastError || null }));
+      summary.items.push({ id: row.id, girlId: row.girl_id, requirementId: row.requirement_id, badge: row.badge_name, label: `${row.number}${row.letter || ''}`, status, error: lastError || null });
+      summary[status === 'sent' ? 'pushed' : status === 'held' ? 'held' : status === 'skipped' ? 'skippedRows' : 'failed'] += 1;
+    };
+
+    try {
+      for (const row of rows) {
+        const girl = db.prepare('SELECT * FROM girls WHERE id = ?').get(row.girl_id);
+        const completion = row.completion_id ? db.prepare('SELECT * FROM completions WHERE id = ?').get(row.completion_id) : null;
+        if (!girl || !girl.active || !girl.ahg_youth_id) { finish(row, 'held', 'girl is not active / not mapped to AHGFamily'); continue; }
+        if (!completion || completion.status !== 'confirmed') { finish(row, 'skipped', 'completion is no longer confirmed'); continue; }
+        if (!row.award_id || !row.ahg_requirement_id) { finish(row, 'held', 'catalog row lacks an AHGFamily award or requirement id'); continue; }
+        const formDate = toFormDate(row.date || completion.completed_on, cfg.tz);
+        if (!formDate) { finish(row, 'held', `refusing to push an invalid or future completion date (${row.date || completion.completed_on})`); continue; }
+        const note = requirementNote(db, completion, { tz: cfg.tz });
+        const reqId = row.ahg_requirement_id;
+
+        const beforeHtml = await session.standard(row.award_id, girl.ahg_youth_id);
+        const before = parseStandardState(beforeHtml, { awardId: row.award_id });
+        if (!(reqId in before.items)) { finish(row, 'held', 'requirement is not on the Standard form for this badge (catalog drift?) — check on AHGFamily'); continue; }
+        if (before.items[reqId].checked) { finish(row, 'skipped', 'already complete on AHGFamily'); continue; }
+
+        const pageHtml = await session.page('/advancement/index?level=all&style=standard');
+        const outer = serializeForm(pageHtml).filter(([n]) => !/^(youth-select\[\]|badge-select)$/.test(n) && !/^(checkbox|date|comment|new|completed_on|awarded_on|purchased)-[a-z0-9]{12}$/.test(n));
+        const body = [...outer, ['youth-select[]', girl.ahg_youth_id], ['badge-select', row.award_id],
+          ...fragmentPairs(beforeHtml, { check: [`checkbox-${reqId}`], set: { [`date-${reqId}`]: formDate, [`comment-${reqId}`]: note } })];
+
+        await session.save(body);
+        const after = parseStandardState(await session.standard(row.award_id, girl.ahg_youth_id), { awardId: row.award_id });
+        const it = after.items[reqId] || {};
+        const mineOk = it.checked && (it.date || '') === formDate && (it.comment || '') === note;
+        const othersOk = JSON.stringify(itemSig(before, reqId)) === JSON.stringify(itemSig(after, reqId))
+          && JSON.stringify(savedSig(before)) === JSON.stringify(savedSig(after));
+        if (mineOk && othersOk) {
+          finish(row, 'sent', null);
+          db.prepare(`INSERT INTO ahg_state (girl_id, requirement_id, completed, earned_on, comment, fetched_at) VALUES (?, ?, 1, ?, ?, ?)
+                      ON CONFLICT(girl_id, requirement_id) DO UPDATE SET completed = 1, earned_on = excluded.earned_on, comment = excluded.comment, fetched_at = excluded.fetched_at`)
+            .run(row.girl_id, row.requirement_id, completion.completed_on, note, now());
+        } else {
+          const why = !it.checked ? 'requirement did not read back as checked'
+            : (it.date || '') !== formDate ? `date read back as "${it.date || ''}", sent "${formDate}"`
+              : (it.comment || '') !== note ? 'note did not read back as sent (length limit on AHGFamily?)'
+                : 'another requirement or instance changed during the save';
+          finish(row, 'held', `save not confirmed: ${why} — left for review, not retried`);
+          summary.warnings.push(`girl ${row.girl_id} ${row.badge_name} ${row.number}${row.letter || ''}: ${why}`);
+        }
+      }
+    } finally {
+      await session.close();
+    }
+    return summary;
+  });
+}
+
+module.exports = {
+  pushStarInstances, pushRequirementMarks, pushEnabled, setPushEnabled, pushRequirementsEnabled, setPushRequirementsEnabled,
+  toFormDate, serializeForm, panelPairsWithStar, fragmentPairs,
+};

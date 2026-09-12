@@ -127,13 +127,35 @@ copyright rule). Then this file, then `docs/tracker-service-spec.md`
    The one write is `lib/ahgfamily.postAdvancementIndex` (not in the allow-list);
    CLAUDE.md carves out this single exception. **Ships OFF** — `push_enabled`
    setting, admin-only `POST /sync/push` + a "Push to AHGFamily now" button and
-   toggle in the website admin Push-queue panel. **Still to do before relying
-   on it:** (a) Bryan turns the flag on and watches the first real push of a
-   genuinely-earned star; (b) wire the weekly scheduler run (deliberately NOT
-   wired yet — manual only); (c) the e-mailed run report (`REPORT_EMAILS` /
-   SMTP is unconfigured — the per-row log in `push_queue` + the `push` sync_run
-   is what it would be built from). Never `/advancement/delete`,
-   `/fields/toggleServiceVerified` (a GET that WRITES), or any Menu/Delete.
+   toggle in the website admin Push-queue panel.
+   **Extended the same day (117 tests):**
+   - **Weekly run** — `scheduler.js` pushes weekly while `push_enabled` is
+     on and something is queued (stars, then requirements if their flag is on).
+   - **Run report** — `server/lib/report.js`: mailed after every run (weekly
+     or Push now) to `REPORT_EMAILS` via `SMTP_URL`/`REPORT_FROM`
+     (nodemailer; `docs/pi-setup.md` §3); `report_mode` always|errors_only
+     on the admin panel; last report always viewable there; "nothing to
+     push" still mails in always mode. **Mail is unconfigured on the Pi
+     until Bryan sets the three keys** — reports are kept, not sent.
+   - **Requirement push with notes** — `pushRequirementMarks`: for each
+     queued `mark` row, the same full-form save sets `checkbox-/date-/
+     comment-<reqId>`; the comment is `lib/reqnote.js`'s note (every planned
+     meeting **she attended** with its plan notes, a home completion's note,
+     and the leader's dated verification when a planned session was missed).
+     Read-back gates `sent` (her item checked+date+note, every other item
+     and star panel unchanged) else **held**. Behind `push_requirements_enabled`
+     (default OFF) on top of `push_enabled`, because the per-requirement save
+     has **not been watched live** — `docs/step5b-requirement-write-verification.md`
+     is the supervised check to run before turning it on.
+   - **Review page** — finish rows now list every planned meeting with ✓/✗,
+     warn on missed sessions, and require the leader's "I verified she
+     completed the full requirement" box (+ optional note) to confirm;
+     recorded in `completions.verification` (migration 007) and carried into
+     the AHGFamily note.
+   **Still to do:** (a) Bryan sets SMTP keys on the Pi; (b) run step 5b, then
+   enable the requirement push; (c) watch the first real push. Never
+   `/advancement/delete`, `/fields/toggleServiceVerified` (a GET that WRITES),
+   or any Menu/Delete.
 3. Handbook annotation at scale; Pathfinder beads after stars.
 
 ## Operational facts a session may need

@@ -178,7 +178,7 @@ surfaces a large backfill batch of proposals → the proposals UI needs
    no rejection and no validation; 200 either way; `/activities` incomplete;
    `per-page` ignored at 25; 29-id batches fine; pilot star written and
    read back). Prerequisite before step 7: the scope warning in `ahgpull.js`.
-6. ~~Step 7: `add_instance` push~~ **BUILT 2026-09-12** (`server/lib/servicepush.js`):
+6. ~~Step 7: `add_instance` push~~ **BUILT 2026-09-12; extended the same day with the requirement push (marks + notes, `pushRequirementMarks`, behind `push_requirements_enabled` until step 5b), the weekly scheduler run, and the e-mailed run report (`server/lib/report.js`, `report_mode` always|errors_only).** (`server/lib/servicepush.js`):
    drains queued `add_instance` rows, one at a time, each a fetch-build-save-readback
    cycle per the step-5 contract — validates the date itself, echoes every
    panel byte-for-byte, and only marks `sent` when read-back proves +1 with

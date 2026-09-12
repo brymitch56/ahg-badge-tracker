@@ -93,14 +93,38 @@ function proposeForEvent(db, event, tz) {
 }
 
 // ------------------------------------------------------------- proposals --
-const participationFor = (db, girlId, requirementId) => ({
-  count: db.prepare(`SELECT COUNT(*) AS n FROM participation p JOIN plan_items pi ON pi.id = p.plan_item_id
-                     WHERE p.girl_id = ? AND pi.requirement_id = ?`).get(girlId, requirementId).n,
-  planned: db.prepare("SELECT COUNT(*) AS n FROM plan_items WHERE requirement_id = ? AND role IN ('start', 'continue')").get(requirementId).n,
-});
+// Every planned meeting for this requirement that applies to the girl's
+// unit, in date order, with whether she was there (rule 4b: a closed
+// check-in row). The finish/session meeting is included so the list is the
+// requirement's whole story; `count`/`planned` keep the original meaning
+// (start/continue sessions only) and `missed` is what the confirm gate and
+// the AHGFamily note care about.
+function sessionsFor(db, girlId, requirementId) {
+  const girl = db.prepare('SELECT ahg_level FROM girls WHERE id = ?').get(girlId) || {};
+  const rows = db.prepare(`
+    SELECT pi.role, pi.notes AS item_notes, p.notes AS plan_notes, p.level_group, e.id AS event_id, e.title, e.start_at,
+           (SELECT 1 FROM attendance a WHERE a.event_id = e.id AND a.girl_id = ? AND a.open = 0) AS attended
+    FROM plan_items pi JOIN plans p ON p.id = pi.plan_id JOIN events e ON e.id = p.event_id
+    WHERE pi.requirement_id = ? ORDER BY e.start_at, e.id`).all(girlId, requirementId)
+    .filter((r) => (PLAN_GIRL_LEVELS[r.level_group] || []).includes(girl.ahg_level));
+  return rows.map((r) => ({ eventId: r.event_id, date: r.start_at, title: r.title, role: r.role, attended: !!r.attended, itemNotes: r.item_notes || null, planNotes: r.plan_notes || null }));
+}
+// `upTo` (an ISO instant, normally the finish meeting's start) bounds which
+// start/continue meetings count as this requirement's segments; a plan for
+// the same requirement at some later meeting is not a session she missed.
+const participationFor = (db, girlId, requirementId, tz = 'UTC', { upTo = null } = {}) => {
+  const sessions = sessionsFor(db, girlId, requirementId);
+  const partial = sessions.filter((s) => (s.role === 'start' || s.role === 'continue') && (!upTo || s.date <= upTo));
+  return {
+    count: partial.filter((s) => s.attended).length,
+    planned: partial.length,
+    sessions: sessions.map((s) => ({ ...s, localDate: localDate(s.date, tz) })),
+    missed: partial.filter((s) => !s.attended).map((s) => localDate(s.date, tz)),
+  };
+};
 
 /** The after-meeting screen: proposed rows grouped by girl, plus flagged confirmed rows. */
-function eventProposals(db, event) {
+function eventProposals(db, event, { tz = 'UTC' } = {}) {
   const rows = db.prepare(`
     SELECT c.*, g.first_name, g.last_name, g.nickname, g.ahg_level,
            r.number, r.letter, r.title, r.badge_id, b.name AS badge_name, pi.role
@@ -129,7 +153,8 @@ function eventProposals(db, event) {
       completedOn: c.completed_on,
       needsReview: !!c.needs_review,
       reviewReason: c.review_reason,
-      participation: c.role === 'finish' ? participationFor(db, c.girl_id, c.requirement_id) : null,
+      participation: c.role === 'finish' ? participationFor(db, c.girl_id, c.requirement_id, tz, { upTo: c.start_at || (db.prepare('SELECT start_at FROM events WHERE id = ?').get(c.event_id) || {}).start_at }) : null,
+      verification: c.verification ? JSON.parse(c.verification) : null,
     });
   }
   return { eventId: event.id, title: event.title, startAt: event.start_at, girls: [...byGirl.values()] };
@@ -141,8 +166,8 @@ function eventProposals(db, event) {
  * from the girl's *current* level (rule 9). Re-confirming a flagged
  * confirmed row clears its review flag; rejecting it retracts it.
  */
-function decide(db, event, decisions, actor) {
-  return decideRows(db, decisions, actor, { eventId: event.id });
+function decide(db, event, decisions, actor, { tz = 'UTC' } = {}) {
+  return decideRows(db, decisions, actor, { eventId: event.id, tz });
 }
 
 /**
@@ -152,7 +177,7 @@ function decide(db, event, decisions, actor) {
  * first. `levelGroup` filters by the PLAN's level group (the unit whose
  * plan generated the item), so a unit leader sees exactly her unit's work.
  */
-function pendingProposals(db, { levelGroup = null, now = new Date().toISOString() } = {}) {
+function pendingProposals(db, { levelGroup = null, now = new Date().toISOString(), tz = 'UTC' } = {}) {
   const rows = db.prepare(`
     SELECT c.*, g.first_name, g.last_name, g.nickname, g.ahg_level,
            r.number, r.letter, r.title, r.badge_id, b.name AS badge_name, pi.role, p.level_group,
@@ -187,7 +212,8 @@ function pendingProposals(db, { levelGroup = null, now = new Date().toISOString(
       completedOn: c.completed_on,
       needsReview: !!c.needs_review,
       reviewReason: c.review_reason,
-      participation: c.role === 'finish' ? participationFor(db, c.girl_id, c.requirement_id) : null,
+      participation: c.role === 'finish' ? participationFor(db, c.girl_id, c.requirement_id, tz, { upTo: c.start_at || (db.prepare('SELECT start_at FROM events WHERE id = ?').get(c.event_id) || {}).start_at }) : null,
+      verification: c.verification ? JSON.parse(c.verification) : null,
     });
     ev.count += 1;
   }
@@ -211,9 +237,9 @@ function pendingCounts(db, { now = new Date().toISOString() } = {}) {
 }
 
 /** decide() without the per-event constraint — the review queue's bulk path. */
-function decideRows(db, decisions, actor, { eventId = null } = {}) {
+function decideRows(db, decisions, actor, { eventId = null, tz = 'UTC' } = {}) {
   if (!Array.isArray(decisions) || !decisions.length) {
-    throw new CompletionError(400, 'body must be [{ completionId, decision: confirm|reject, completedOn? }, …]');
+    throw new CompletionError(400, 'body must be [{ completionId, decision: confirm|reject, completedOn?, verified?, note? }, …]');
   }
   const run = db.transaction(() => {
     const results = [];
@@ -230,11 +256,25 @@ function decideRows(db, decisions, actor, { eventId = null } = {}) {
       }
       if (d.decision === 'confirm') {
         const girl = db.prepare('SELECT * FROM girls WHERE id = ?').get(c.girl_id);
+        // A requirement planned over several meetings: confirming a girl who
+        // missed one is allowed, but only with the leader's explicit word
+        // that she completed the whole requirement — recorded here and
+        // written into the AHGFamily note later, dated and signed.
+        const pi = c.plan_item_id ? db.prepare('SELECT role FROM plan_items WHERE id = ?').get(c.plan_item_id) : null;
+        const ev = c.event_id ? db.prepare('SELECT start_at FROM events WHERE id = ?').get(c.event_id) : null;
+        const missed = pi && pi.role === 'finish' ? participationFor(db, c.girl_id, c.requirement_id, tz, { upTo: ev ? ev.start_at : null }).missed : [];
+        let verification = null;
+        if (missed.length) {
+          if (d.verified !== true) {
+            throw new CompletionError(409, `completion ${d.completionId}: planned session(s) on ${missed.join(', ')} were missed — confirm only with verified: true after checking she completed the full requirement`);
+          }
+          verification = { missed, note: typeof d.note === 'string' && d.note.trim() ? d.note.trim() : null, verifiedBy: actor, verifiedAt: now() };
+        }
         db.prepare(`UPDATE completions SET status = 'confirmed', completed_on = ?, level_at_completion = ?,
-                    needs_review = 0, review_reason = NULL, decided_by = ?, decided_at = ? WHERE id = ?`)
-          .run(d.completedOn || c.completed_on, girl.ahg_level, actor, now(), c.id);
+                    needs_review = 0, review_reason = NULL, decided_by = ?, decided_at = ?, verification = ? WHERE id = ?`)
+          .run(d.completedOn || c.completed_on, girl.ahg_level, actor, now(), verification ? JSON.stringify(verification) : null, c.id);
         auditRow(db, actor, 'completion.confirm', c.id, { status: c.status, needsReview: !!c.needs_review },
-          { completedOn: d.completedOn || c.completed_on, levelAtCompletion: girl.ahg_level });
+          { completedOn: d.completedOn || c.completed_on, levelAtCompletion: girl.ahg_level, verification });
       } else {
         db.prepare("UPDATE completions SET status = 'rejected', needs_review = 0, review_reason = NULL, decided_by = ?, decided_at = ? WHERE id = ?")
           .run(actor, now(), c.id);
@@ -354,4 +394,4 @@ module.exports = {
 };
 
 // Review queue (cross-event catch-up) — see pendingProposals above.
-Object.assign(module.exports, { pendingProposals, pendingCounts, decideRows });
+Object.assign(module.exports, { pendingProposals, pendingCounts, decideRows, sessionsFor, participationFor });

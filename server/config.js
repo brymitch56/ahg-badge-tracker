@@ -32,6 +32,13 @@ function makeConfig(env = process.env) {
       apiKey: env.CHECKIN_API_KEY || '',
       webhookSecret: env.CHECKIN_WEBHOOK_SECRET || '',
     },
+    // Push run report mail (server/lib/report.js). All three needed to send;
+    // otherwise the report is only kept for the admin page.
+    mail: {
+      smtpUrl: env.SMTP_URL || '',
+      from: env.REPORT_FROM || '',
+      to: String(env.REPORT_EMAILS || '').split(',').map((s) => s.trim()).filter(Boolean),
+    },
     // Key that encrypts the stored AHGFamily password (server/lib/credcrypto.js);
     // auto-generated into .env on first credential save when absent.
     credKeyHex: /^[0-9a-fA-F]{64}$/.test(env.CRED_KEY || '') ? env.CRED_KEY : '',
