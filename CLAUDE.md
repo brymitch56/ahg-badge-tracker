@@ -45,10 +45,18 @@ The fetch scripts may call only:
 - `POST /advancement/badge-tracker-view` (HTML fragment; read-only)
 
 They must NEVER call `POST /advancement/process-advancement` (toggles an
-item), `POST /advancement/index` (Standard-view save), or
-`GET /advancement/delete` (deletes a record). Those are data-changing;
-the push design that will eventually use them lives in a later phase
-behind explicit review, never in a catalog/fetch script.
+item) or `GET /advancement/delete` (deletes a record). Those are
+data-changing and are never called anywhere.
+
+`POST /advancement/index` (the Standard-view save) is the **one** write the
+project makes, and it lives in exactly one audited place:
+`server/lib/servicepush.js` (step 7, the Service Star push), reached only
+through `lib/ahgfamily.js`'s `postAdvancementIndex` — which is deliberately
+**not** in the read-only allow-list, so `request()` still refuses a write
+everywhere else. It ships behind the `push_enabled` setting (default off),
+is admin-only and manual, never retries an unconfirmed save, and latches on
+auth failure like every other AHGFamily call. Do not widen this: no other
+module may write, and a catalog/fetch script never writes.
 
 Auth failures are terminal: exit immediately, never retry in a loop
 (AHGFamily may lock the account). Throttle every request (~300 ms).

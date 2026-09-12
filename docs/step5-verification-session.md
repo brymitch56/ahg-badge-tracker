@@ -107,6 +107,10 @@ Only after §1–§3 are recorded:
 | `youth[]` batch limit | 29 ids in one request fine (117 KB fragment). The two ids dropped were the same two girls — they are **outside the pull account's advancement scope** (not in the page's youth dropdown), not a ceiling. `s.grid()` on a **star** award returns a 1.3 KB stub (no grid for instance awards; expected). | 2026-09-12 |
 | Pilot save + read-back + manual removal | Written (via the stale-slot test): 7 → 8 instances, new panel `09/12/2026`, comment `tracker: step5 verification 2026-09-12`, awarded_on empty, not purchased; all pre-existing panels byte-identical. Read-back via fragment and profile grid agree. Removal by Bryan by hand — **two** instances to delete (the dateless one from the invalid-date test, and this one). | 2026-09-12 |
 
+> **Step 7 built 2026-09-12** on these findings — `server/lib/servicepush.js`,
+> behind `push_enabled` (off), admin-only `POST /sync/push`. Each consequence
+> below is implemented and tested (`test/servicepush.test.js`).
+
 ### Consequences for step 7 (update `service-stars-plan.md` → "The write")
 
 1. **Fetch-and-save in one breath.** Never queue a slot id; the queue holds

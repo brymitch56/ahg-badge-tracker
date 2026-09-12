@@ -64,6 +64,13 @@ async function makeLiveSession(db, { key = null, env = process.env } = {}) {
       await A.sleep(acfg.throttleMs);
       return A.getPage(acfg, jar, pathWithQuery);
     },
+    // THE ONE WRITE — used only by servicepush.js behind the push_enabled flag.
+    // bodyPairs is the full Standard-view form, already built and validated by
+    // the caller. Returns { status, location, html } and judges nothing.
+    async save(bodyPairs) {
+      await A.sleep(acfg.throttleMs);
+      return A.postAdvancementIndex(acfg, jar, token, bodyPairs);
+    },
     async close() { try { await A.request(acfg, jar, '/logout'); } catch { /* best effort */ } },
   };
 }

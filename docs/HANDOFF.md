@@ -119,12 +119,21 @@ copyright rule). Then this file, then `docs/tracker-service-spec.md`
    pull summary's `crossCheck`. Weekly pull is now armed on the scheduler.
    Plan-doc step 5 (pre-write verifications) is still open and belongs
    before any push code.
-2. **Step 7 — push to AHGFamily**: still deliberately unbuilt, behind a
-   flag, needs Bryan's explicit go after real-meeting testing. The star
-   `add_instance` push may be its lowest-risk pilot. Includes the weekly
-   e-mailed run report. Never `/advancement/delete`; also never
-   `/fields/toggleServiceVerified` (a GET that WRITES — new finding) or
-   any per-row Menu/Delete control.
+2. **Step 7 — push to AHGFamily: BUILT 2026-09-12** (`server/lib/servicepush.js`,
+   `test/servicepush.test.js`, 111 tests). The `add_instance` star push drains
+   the queue one row at a time: validate the date, fetch the Standard fragment
+   fresh, echo every panel, POST, then read back — `sent` only when the new
+   instance is confirmed and nothing else moved, else **held** (never retried).
+   The one write is `lib/ahgfamily.postAdvancementIndex` (not in the allow-list);
+   CLAUDE.md carves out this single exception. **Ships OFF** — `push_enabled`
+   setting, admin-only `POST /sync/push` + a "Push to AHGFamily now" button and
+   toggle in the website admin Push-queue panel. **Still to do before relying
+   on it:** (a) Bryan turns the flag on and watches the first real push of a
+   genuinely-earned star; (b) wire the weekly scheduler run (deliberately NOT
+   wired yet — manual only); (c) the e-mailed run report (`REPORT_EMAILS` /
+   SMTP is unconfigured — the per-row log in `push_queue` + the `push` sync_run
+   is what it would be built from). Never `/advancement/delete`,
+   `/fields/toggleServiceVerified` (a GET that WRITES), or any Menu/Delete.
 3. Handbook annotation at scale; Pathfinder beads after stars.
 
 ## Operational facts a session may need

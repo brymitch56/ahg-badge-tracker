@@ -14,6 +14,7 @@ const plans = require('./lib/plans');
 const proposals = require('./lib/proposals');
 const ahgpull = require('./lib/ahgpull');
 const servicepull = require('./lib/servicepull');
+const servicepush = require('./lib/servicepush');
 const access = require('./lib/access');
 
 let VERSION = null;
@@ -291,6 +292,7 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
       webhookDeliveries: db.prepare('SELECT COUNT(*) AS n FROM webhook_txns').get().n,
       queue: Object.fromEntries(db.prepare('SELECT status, COUNT(*) AS n FROM push_queue GROUP BY status').all().map((r) => [r.status, r.n])),
       openConflicts: db.prepare("SELECT COUNT(*) AS n FROM conflicts WHERE status = 'open'").get().n,
+      pushEnabled: servicepush.pushEnabled(db),
     });
   });
 
@@ -335,6 +337,27 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
       return res.status(502).json({ error: 'service pull failed', detail: e.message });
     }
     return undefined;
+  });
+  // ----------------------------------- Service Stars push (step 7, gated) --
+  // Ships OFF. Writing to AHGFamily requires an admin to flip push_enabled,
+  // and is manual-only ("Push now"). servicepush is the one module that writes.
+  api.post('/sync/push', admin, async (req, res) => {
+    try {
+      res.json(await servicepush.pushStarInstances(db, cfg, {
+        ...(ahgSessionFactory ? { sessionFactory: ahgSessionFactory } : {}), key: credKey(), actor: req.user.email,
+      }));
+    } catch (e) {
+      if (e instanceof ahgpull.PullError) return pullErr(res, e, db);
+      console.error('[tracker] push failed:', e);
+      return res.status(502).json({ error: 'push failed', detail: e.message });
+    }
+    return undefined;
+  });
+  api.post('/admin/push-enabled', admin, (req, res) => {
+    const on = servicepush.setPushEnabled(db, req.body && req.body.enabled === true, req.user.email);
+    db.prepare('INSERT INTO audit_log (at, actor, action, entity, entity_id, before, after) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(new Date().toISOString(), req.user.email, 'push.enabled', 'settings', 'push_enabled', null, JSON.stringify({ enabled: on }));
+    res.json({ pushEnabled: on });
   });
   api.get('/stars', leader, (req, res) => res.json(servicepull.listStars(db, { girlId: req.query.girlId ? Number(req.query.girlId) : null })));
   api.get('/stars/proposals', leader, (req, res) => res.json(servicepull.listStarProposals(db, { all: req.query.all === '1' })));

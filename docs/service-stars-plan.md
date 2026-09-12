@@ -178,9 +178,17 @@ surfaces a large backfill batch of proposals → the proposals UI needs
    no rejection and no validation; 200 either way; `/activities` incomplete;
    `per-page` ignored at 25; 29-id batches fine; pilot star written and
    read back). Prerequisite before step 7: the scope warning in `ahgpull.js`.
-6. Step 7: `add_instance` push per the write contract above — plausibly the
-   FIRST push we enable (single additive save, lower risk than requirement
-   toggling), weekly report includes stars.
+6. ~~Step 7: `add_instance` push~~ **BUILT 2026-09-12** (`server/lib/servicepush.js`):
+   drains queued `add_instance` rows, one at a time, each a fetch-build-save-readback
+   cycle per the step-5 contract — validates the date itself, echoes every
+   panel byte-for-byte, and only marks `sent` when read-back proves +1 with
+   the new panel's date+comment and every pre-existing panel unchanged;
+   otherwise the row is **held** for a human (never a blind retry — duplicate
+   risk). The single write is `lib/ahgfamily.postAdvancementIndex`, not in the
+   read-only allow-list. Gated by the `push_enabled` setting (default OFF),
+   admin-only `POST /sync/push` ("Push to AHGFamily now"), latches on auth
+   failure. **Still manual-only and OFF** — not wired into the weekly
+   scheduler, and the e-mailed run report (below) is not built yet.
 
 ## Pathfinder beads (unchanged from draft 1, now cheaper)
 
