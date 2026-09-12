@@ -14,6 +14,10 @@ if (cfg.auth.disabled) console.warn('[tracker] WARNING: AUTH_DISABLED — every 
 if (!cfg.siteOrigin) console.warn('[tracker] SITE_ORIGIN not set — browser calls from the website will be blocked by CORS.');
 
 const app = createApp({ cfg, db });
+// Warm the Microsoft signing-key cache in the background (retries for a few
+// minutes); on the Pi's Wi-Fi the first fetch can be slow, and a leader's
+// first request must not be the one that pays for it.
+if (!cfg.auth.disabled && app.locals.auth) app.locals.auth.warm().catch(() => {});
 const server = app.listen(cfg.port, '127.0.0.1', () => {
   console.log(`[tracker] listening on http://127.0.0.1:${cfg.port} (db: ${cfg.dbPath})`);
 });

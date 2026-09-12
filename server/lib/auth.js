@@ -76,7 +76,20 @@ function makeAuth(cfg, { jwks = null, issuer = null, getAccess = null } = {}) {
     }
   };
 
-  return { verify, require: require_, AuthError };
+  // Pre-fetch the signing keys at boot, retrying patiently, so the first
+  // leader after a restart never pays for (or fails on) the remote fetch.
+  async function warm({ attempts = 8, delayMs = 30000, log = (m) => console.log(m), sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+    if (!keys || typeof keys.reload !== 'function') return false;
+    for (let i = 1; i <= attempts; i++) {
+      try { await keys.reload(); log('[tracker] Microsoft signing keys cached'); return true; } catch (e) {
+        log(`[tracker] signing keys not fetched yet (${e.code || e.message}) — attempt ${i}/${attempts}`);
+      }
+      if (i < attempts) await sleep(delayMs);
+    }
+    return false;
+  }
+
+  return { verify, require: require_, warm, AuthError };
 }
 
 module.exports = { makeAuth, AuthError };

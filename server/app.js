@@ -67,6 +67,7 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
   });
 
   const auth = makeAuth(cfg, { jwks, issuer, getAccess: () => access.getAccess(db, cfg) });
+  app.locals.auth = auth; // index.js warms the signing-key cache at boot
   const leader = auth.require('leader');
   const admin = auth.require('admin');
 

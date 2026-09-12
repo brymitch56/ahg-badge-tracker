@@ -176,7 +176,17 @@ async function syncPeople(db, client) {
  */
 async function refreshAttendance(db, client, eventRow) {
   return recordRun(db, 'attendance', async () => {
-    const ans = await client.attendance(eventRow.checkin_event_id);
+    let ans;
+    try {
+      ans = await client.attendance(eventRow.checkin_event_id);
+    } catch (e) {
+      // The event was deleted on the check-in side. That is a fact about the
+      // calendar, not a failed sync: record it as such (ok) so /health and
+      // the admin status do not show "error" for a day, and leave the
+      // mirrored attendance alone (the next events sync marks it removed).
+      if (e instanceof CheckinError && e.status === 404) return { eventId: eventRow.id, checkinEventId: eventRow.checkin_event_id, gone: true, rows: 0, open: 0 };
+      throw e;
+    }
     const ts = now();
     const write = db.transaction(() => {
       db.prepare('DELETE FROM attendance WHERE event_id = ?').run(eventRow.id);
