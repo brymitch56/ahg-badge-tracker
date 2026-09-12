@@ -179,7 +179,7 @@ test('pull: a mapped girl absent from every fragment is reported as out of scope
   const s = await r.json();
   assert.deepEqual(s.unseenGirls, [cora]);
   assert.equal(s.warnings.length, 1);
-  assert.match(s.warnings[0], /1 mapped girl\(s\) never appeared .* outside the pull account's scope .* NOT refreshed/);
+  assert.match(s.warnings[0], /1 mapped girl\(s\) never appeared .* registration not finished .* NOT refreshed/);
   assert.deepEqual(db.prepare('SELECT fetched_at FROM ahg_state WHERE girl_id = ? ORDER BY requirement_id').all(cora), coraBefore, "Cora's rows untouched");
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM conflicts WHERE girl_id = ? AND status = 'open'").get(cora).n, 0, 'no conflict invented from absence');
 });

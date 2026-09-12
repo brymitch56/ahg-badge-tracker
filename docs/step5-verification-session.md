@@ -121,8 +121,11 @@ Only after §1–§3 are recorded:
    panel unchanged. Anything else → conflict for a human, never a retry.
 4. **Scope check before every pull and every push.** A mapped, active girl
    who yields no cells / is not in the youth dropdown must be reported, not
-   silently skipped — `ahgpull.js` currently leaves her `ahg_state` stale
-   with no warning (two girls since 2026-09-08).
+   silently skipped — `ahgpull.js` used to leave her `ahg_state` stale with
+   no warning (fixed 2026-09-12). **Cause found (Bryan):** the two girls have
+   not finished registration on AHGFamily and have no member ID yet, so the
+   advancement views omit them while their profile pages still exist. Expected
+   to clear itself once registration completes; the warning names this.
 
 ### Housekeeping
 

@@ -176,7 +176,7 @@ async function pullAhgState(db, cfg, { sessionFactory = makeLiveSession, key = n
       const unseen = badges.length ? girls.filter((g) => !seenYouth.has(g.id)) : [];
       summary.unseenGirls = unseen.map((g) => g.id);
       if (unseen.length) {
-        summary.warnings.push(`${unseen.length} mapped girl(s) never appeared in the badge-tracker view (girl ids ${unseen.map((g) => g.id).join(', ')}) — outside the pull account's scope on AHGFamily; their AHGFamily state was NOT refreshed`);
+        summary.warnings.push(`${unseen.length} mapped girl(s) never appeared in the badge-tracker view (girl ids ${unseen.map((g) => g.id).join(', ')}) — usually registration not finished on AHGFamily (no member ID yet), otherwise outside the pull account's scope; their AHGFamily state was NOT refreshed`);
       }
 
       reconcile(db, badges, summary, actor);

@@ -108,8 +108,8 @@ copyright rule). Then this file, then `docs/tracker-service-spec.md`
    advancement view since 09-08 and `ahgpull` skipped them silently** —
    fixed the same day (`3e82618`, deployed): the run now carries
    `unseenGirls` + a warning naming them; the next weekly pull will name
-   the two, and the question for Bryan is why the pull account cannot see
-   them (unit assignment?). Bryan removes the two test instances by hand
+   the two, and cause per Bryan: their AHGFamily registration is not finished (no member
+   ID yet), so the advancement views omit them; clears itself on completion. Bryan removes the two test instances by hand
    (comment `tracker: step5 verification 2026-09-12`).
    **Finding for Bryan/the coordinator:** AHGFamily's own `Stars Eligible`
    carries approved Pathfinder hours into Tenderheart (4 girls, gaps of 1–2
