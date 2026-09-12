@@ -105,9 +105,12 @@ copyright rule). Then this file, then `docs/tracker-service-spec.md`
    per fetch; the save never rejects and never validates (a bad date writes
    a dateless star; 200 + `alert-success` either way) so success is
    read-back only; **two mapped girls are invisible to the pull account's
-   advancement view since 09-08 and `ahgpull` skips them silently** — add a
-   scope warning before step 7. Bryan removes the two test instances by
-   hand (comment `tracker: step5 verification 2026-09-12`).
+   advancement view since 09-08 and `ahgpull` skipped them silently** —
+   fixed the same day (`3e82618`, deployed): the run now carries
+   `unseenGirls` + a warning naming them; the next weekly pull will name
+   the two, and the question for Bryan is why the pull account cannot see
+   them (unit assignment?). Bryan removes the two test instances by hand
+   (comment `tracker: step5 verification 2026-09-12`).
    **Finding for Bryan/the coordinator:** AHGFamily's own `Stars Eligible`
    carries approved Pathfinder hours into Tenderheart (4 girls, gaps of 1–2
    stars each, exactly explained), and the 6 "legacy" baselines are those
