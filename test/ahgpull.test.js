@@ -165,6 +165,23 @@ test('pull: grid → ahg_state; rule 6 creates ahgfamily completions with dates 
   const s2 = await r.json();
   assert.deepEqual({ newFromAhg: s2.newFromAhg, queued: s2.queued, detailFetches: s2.detailFetches }, { newFromAhg: 0, queued: 0, detailFetches: 0 });
   assert.deepEqual({ g: scenario.gridCalls - before.g, s: scenario.standardCalls - before.s }, { g: 1, s: 0 });
+  assert.deepEqual({ unseen: s2.unseenGirls, warnings: s2.warnings }, { unseen: [], warnings: [] }, 'every mapped girl appeared');
+});
+
+test('pull: a mapped girl absent from every fragment is reported as out of scope, not silently skipped', async () => {
+  // Seen live 2026-09-12: the badge-tracker view is scoped to what the pull
+  // account may see, and a girl outside it yields no cells at all. Her state
+  // must not be touched, and the run must say so.
+  const adminT = await token({ groups: [GROUP], preferred_username: 'admin@example.com' });
+  const coraBefore = db.prepare('SELECT fetched_at FROM ahg_state WHERE girl_id = ? ORDER BY requirement_id').all(cora);
+  scenario.grid = [['utest0000001', 'r00000test01', 1], ['utest0000001', 'r00000test02', 0]]; // Bea only
+  const r = await get('/api/v1/sync/pull', adminT, { method: 'POST' });
+  const s = await r.json();
+  assert.deepEqual(s.unseenGirls, [cora]);
+  assert.equal(s.warnings.length, 1);
+  assert.match(s.warnings[0], /1 mapped girl\(s\) never appeared .* outside the pull account's scope .* NOT refreshed/);
+  assert.deepEqual(db.prepare('SELECT fetched_at FROM ahg_state WHERE girl_id = ? ORDER BY requirement_id').all(cora), coraBefore, "Cora's rows untouched");
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM conflicts WHERE girl_id = ? AND status = 'open'").get(cora).n, 0, 'no conflict invented from absence');
 });
 
 test('pull: agreement skips the queued mark; un-check there opens a conflict, never a silent revert', async () => {

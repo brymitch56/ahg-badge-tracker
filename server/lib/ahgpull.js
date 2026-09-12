@@ -105,6 +105,11 @@ async function pullAhgState(db, cfg, { sessionFactory = makeLiveSession, key = n
     try {
       const byYouthId = new Map(girls.map((g) => [g.ahg_youth_id, g]));
       const youthIds = girls.map((g) => g.ahg_youth_id);
+      // Scope gate (step 5, 2026-09-12): the badge-tracker view is scoped to
+      // what the pull account may see, and a girl outside that scope simply
+      // yields no cells — which used to look like "nothing changed" and left
+      // her ahg_state stale forever. Count who actually appeared.
+      const seenYouth = new Set();
 
       for (const badge of badges) {
         // tracker requirement id per AHGFamily requirement id, this badge only
@@ -118,6 +123,7 @@ async function pullAhgState(db, cfg, { sessionFactory = makeLiveSession, key = n
         const needDetail = new Set(); // girls with a checked item missing its date
         for (const cell of cells) {
           const girl = byYouthId.get(cell.youthId);
+          if (girl) seenYouth.add(girl.id);
           const reqId = reqByAhgId.get(cell.itemId);
           if (!girl || !reqId) continue; // other youth, the award's own row, or a grid-only id
           summary.cells += 1;
@@ -162,6 +168,15 @@ async function pullAhgState(db, cfg, { sessionFactory = makeLiveSession, key = n
                         (SELECT id FROM requirements WHERE badge_id = ?)`).run(rec.adId, girl.id, badge.id);
           }
         }
+      }
+
+      // A mapped, active girl who appeared in no fragment is a scope problem
+      // on the AHGFamily side (unit assignment, account permissions), not
+      // "no badge work". Say so — her state has NOT been refreshed.
+      const unseen = badges.length ? girls.filter((g) => !seenYouth.has(g.id)) : [];
+      summary.unseenGirls = unseen.map((g) => g.id);
+      if (unseen.length) {
+        summary.warnings.push(`${unseen.length} mapped girl(s) never appeared in the badge-tracker view (girl ids ${unseen.map((g) => g.id).join(', ')}) — outside the pull account's scope on AHGFamily; their AHGFamily state was NOT refreshed`);
       }
 
       reconcile(db, badges, summary, actor);
