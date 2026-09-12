@@ -12,6 +12,10 @@
  *   6. leader: `groups` contains LEADER_GROUP_ID, or preferred_username ∈ LEADER_EMAILS
  * Role: 'admin' if the e-mail is in ADMIN_EMAILS, else 'leader'.
  *
+ * The remote JWKS is cached for a day (an unknown `kid` still triggers a
+ * refetch, so key rotation is safe) and fetched with a 20 s timeout: the Pi
+ * sits on Wi-Fi, and one slow fetch after a restart must not lock every
+ * leader out with ERR_JWKS_TIMEOUT (seen 2026-09-12).
  * `jwks` is injectable so tests can sign tokens with a local key.
  * A Graph token is never accepted — its audience is Graph, not us.
  */
@@ -25,7 +29,7 @@ function makeAuth(cfg, { jwks = null, issuer = null, getAccess = null } = {}) {
   const a = cfg.auth;
   const iss = issuer || `https://login.microsoftonline.com/${a.tenantId}/v2.0`;
   const keys = jwks || (a.tenantId
-    ? createRemoteJWKSet(new URL(`https://login.microsoftonline.com/${a.tenantId}/discovery/v2.0/keys`), { cooldownDuration: 30000, cacheMaxAge: 600000 })
+    ? createRemoteJWKSet(new URL(`https://login.microsoftonline.com/${a.tenantId}/discovery/v2.0/keys`), { cooldownDuration: 30000, cacheMaxAge: 24 * 3600e3, timeoutDuration: 20000 })
     : null);
   const audiences = [a.clientId, `api://${a.clientId}`].filter(Boolean);
   // Access lists are resolved per request so the Admin page's changes
