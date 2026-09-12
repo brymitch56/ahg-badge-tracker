@@ -94,15 +94,40 @@ Only after §1–§3 are recorded:
   `docs/service-stars-plan.md` → "The write" before step 7 starts.
 - Step 7 stays behind its flag and behind Bryan's explicit go.
 
-## Answers (fill in)
+## Answers (session run 2026-09-12, Bryan present; one Patriot-level test girl, ids kept out of git)
 
 | Question | Answer | Date |
 |---|---|---|
-| `new-` slot ids stable across 10 min? | | |
-| …across sessions? | | |
-| Rejected save: status / shape | | |
-| Stale save: refused or last-write-wins? | | |
-| `/activities` coverage = mapped roster? | | |
-| `per-page` ceiling | | |
-| `youth[]` batch limit | | |
-| Pilot save + read-back + manual removal | | |
+| `new-` slot ids stable across 10 min? | **No — they change on every `badge-tracker-view` fetch**, even two back-to-back in one login. Saved-instance ids are stable. | 2026-09-12 |
+| …across sessions? | Different per fetch, so also different per session. | 2026-09-12 |
+| Rejected save: status / shape | **There is no rejection.** Every POST answered **200** (not 302 — the 302 in CAPTURE 5 was the browser navigation) with the full page and an `alert-success` block, whether or not anything was written. Missing `completed_on` with `new-=true` → nothing written. `completed_on=13/45/2026` → **an instance was created with a null date** and our comment. No validation markup anywhere. | 2026-09-12 |
+| Stale save: refused or last-write-wins? | **Honoured.** A `new-` slot id from an older fetch (already superseded by a newer fetch) created a correctly dated instance. The id is evidently just an unused token, not a reservation. Concurrency: no lock token; assume last-write-wins. | 2026-09-12 |
+| `/activities` coverage = mapped roster? | **No.** 28 of 29 mapped girls; two (with 11 and 20 verified rows on their profile ledgers) are absent even unfiltered. Their profile pages load fine — the profile path the pull uses is the right one; `/activities` must never be the source. | 2026-09-12 |
+| `per-page` ceiling | Ignored: **25 rows fixed** (671 rows → 27 pages), `per-page=500` and `1000` both return 25. | 2026-09-12 |
+| `youth[]` batch limit | 29 ids in one request fine (117 KB fragment). The two ids dropped were the same two girls — they are **outside the pull account's advancement scope** (not in the page's youth dropdown), not a ceiling. `s.grid()` on a **star** award returns a 1.3 KB stub (no grid for instance awards; expected). | 2026-09-12 |
+| Pilot save + read-back + manual removal | Written (via the stale-slot test): 7 → 8 instances, new panel `09/12/2026`, comment `tracker: step5 verification 2026-09-12`, awarded_on empty, not purchased; all pre-existing panels byte-identical. Read-back via fragment and profile grid agree. Removal by Bryan by hand — **two** instances to delete (the dateless one from the invalid-date test, and this one). | 2026-09-12 |
+
+### Consequences for step 7 (update `service-stars-plan.md` → "The write")
+
+1. **Fetch-and-save in one breath.** Never queue a slot id; the queue holds
+   the intent (girl, award, date, comment), and the push fetches the fragment
+   immediately before the POST.
+2. **The server validates nothing.** The push must validate the date itself
+   (`MM/DD/YYYY`, a real calendar date, not in the future) before sending;
+   a bad date does not fail, it writes a dateless star.
+3. **Success is only provable by read-back.** Treat 200 + `alert-success` as
+   "request accepted", then re-fetch the fragment and confirm: instance count
+   +1, the new panel carries the sent date and comment, every pre-existing
+   panel unchanged. Anything else → conflict for a human, never a retry.
+4. **Scope check before every pull and every push.** A mapped, active girl
+   who yields no cells / is not in the youth dropdown must be reported, not
+   silently skipped — `ahgpull.js` currently leaves her `ahg_state` stale
+   with no warning (two girls since 2026-09-08).
+
+### Housekeeping
+
+The session scripts and captures live only on the Pi under
+`data/captures/step5-*` (gitignored): `step5-read{,2..6}.js`,
+`step5-write.js` (phases a/b/c run; `d` not needed), fragments t0/t10, POST
+bodies and responses. The girl is passed as `STEP5_GIRL` on the command
+line, never stored.

@@ -110,6 +110,17 @@ inside the fragment. Consequences, all mandatory:
    visible to leaders on AHGFamily. Preserve existing comments exactly.
 4. Verified live: adding one star left the other 9 panels untouched, and
    the saved panel drops its `new-` field (the discriminator round-trips).
+5. **Step 5 findings (2026-09-12, `docs/step5-verification-session.md`):**
+   blank `new-` slot ids are **per fetch** (but an older fetch's id is still
+   honoured — it is an unused token, not a reservation); the save answers
+   **200 + `alert-success` whether or not it wrote**; the server **does not
+   validate** — an invalid date creates a dateless instance. So the push:
+   fetches immediately before saving, validates the date itself, and proves
+   success only by read-back (count +1, new panel matches, others
+   byte-identical); anything else is a conflict, never a retry.
+6. **Scope gate:** the pull account cannot see every mapped girl in the
+   advancement view (two girls missing since 2026-09-08). Pulls and pushes
+   must report a mapped active girl who yields nothing, not skip her.
 
 ## New forbidden endpoints (extend the never-call list)
 
@@ -162,11 +173,11 @@ surfaces a large backfill batch of proposals → the proposals UI needs
    Progress (hours at level, carry-in/out, on record, next-star progress);
    bulk confirm on the proposals screen; AHGFamily `Stars Eligible`
    cross-check warning.
-5. **Pre-write verifications** (one supervised session, before any push
-   code): do blank `new-` slot ids survive a delay between fragment fetch
-   and save? what does a rejected save look like (vs the 302)? `/activities`
-   role-scoping under the pull account; `per-page` ceiling; `youth[]` batch
-   limit.
+5. ~~Pre-write verifications~~ **DONE 2026-09-12** — answers and their
+   consequences in `docs/step5-verification-session.md` (slot ids per fetch;
+   no rejection and no validation; 200 either way; `/activities` incomplete;
+   `per-page` ignored at 25; 29-id batches fine; pilot star written and
+   read back). Prerequisite before step 7: the scope warning in `ahgpull.js`.
 6. Step 7: `add_instance` push per the write contract above — plausibly the
    FIRST push we enable (single additive save, lower risk than requirement
    toggling), weekly report includes stars.

@@ -100,8 +100,14 @@ copyright rule). Then this file, then `docs/tracker-service-spec.md`
    parses as `{done:100,total:100,pct:null}` (it evidently renders as
    `100/100`, not the `1/1100%` shape the fixture assumes). Nothing reads
    `progress` for a decision; capture the raw cell in the step 5 session and
-   align `parseProgress` + the fixture then. Step 5 itself is now scripted
-   as `docs/step5-verification-session.md` — supervised, one real save.
+   align `parseProgress` + the fixture then. **Step 5 ran 2026-09-12** —
+   answers in `docs/step5-verification-session.md`. Headlines: slot ids are
+   per fetch; the save never rejects and never validates (a bad date writes
+   a dateless star; 200 + `alert-success` either way) so success is
+   read-back only; **two mapped girls are invisible to the pull account's
+   advancement view since 09-08 and `ahgpull` skips them silently** — add a
+   scope warning before step 7. Bryan removes the two test instances by
+   hand (comment `tracker: step5 verification 2026-09-12`).
    **Finding for Bryan/the coordinator:** AHGFamily's own `Stars Eligible`
    carries approved Pathfinder hours into Tenderheart (4 girls, gaps of 1–2
    stars each, exactly explained), and the 6 "legacy" baselines are those
