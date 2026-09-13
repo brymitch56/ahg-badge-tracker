@@ -58,7 +58,9 @@ Ids stay in `data/captures/step5b-notes.md` (gitignored), never in git.
 
 | Question | Answer | Date |
 |---|---|---|
-| Standard save marks a requirement via `checkbox-`? | | |
+| Standard save marks a requirement via `checkbox-`? | **Not as a checkbox.** `checkbox-<rid>` is a Krajee checkbox-x: `<input type="text" value="0|1">`. The first push echoed `0` → date + comment saved, item stayed unchecked, read-back held the row (correct). Fixed: value set to `1` (`dcf3b0f`). Second push pending. | 2026-09-13 |
+| `date-` stored and read back verbatim? | Yes — `09/13/2026` visible on AHGFamily after the first push. | 2026-09-13 |
+| Comment limit / special characters | Short note (`tracker: Completed at home 09/13/2026`) stored verbatim. Limit and `| — & ' "` still untested. | 2026-09-13 |
 | Echoing a checked item keeps it checked? | | |
 | `date-` stored and read back verbatim? | | |
 | Comment limit / special characters | | |
