@@ -305,15 +305,26 @@ function manualCompletion(db, { girlId, requirementId, completedOn, notes }, act
   return db.prepare('SELECT * FROM completions WHERE id = ?').get(r.lastInsertRowid);
 }
 
-/** Delete a completion that never reached AHGFamily (spec §6; the queued-unmark path is step 7). */
-function deleteCompletion(db, id, actor) {
+/**
+ * Delete a completion. One that already reached AHGFamily is refused — the
+ * tracker never un-marks — unless the caller states it has ALREADY been
+ * un-checked on AHGFamily by hand (`afterAhgRemoval`): then the completion
+ * and its queue rows go, the mirror row is reset so the next pull does not
+ * re-propose it, and the audit row records the human removal.
+ */
+function deleteCompletion(db, id, actor, { afterAhgRemoval = false } = {}) {
   const c = db.prepare('SELECT * FROM completions WHERE id = ?').get(id);
   if (!c) throw new CompletionError(404, 'not found');
   const pushed = db.prepare("SELECT 1 FROM push_queue WHERE completion_id = ? AND status = 'sent'").get(id);
-  if (pushed) throw new CompletionError(409, 'already pushed to AHGFamily — deleting it must queue an unmark (step 7)');
-  db.prepare('DELETE FROM push_queue WHERE completion_id = ?').run(id);
-  db.prepare('DELETE FROM completions WHERE id = ?').run(id);
-  auditRow(db, actor, 'completion.delete', id, { girlId: c.girl_id, requirementId: c.requirement_id, status: c.status }, null);
+  if (pushed && !afterAhgRemoval) throw new CompletionError(409, 'already pushed to AHGFamily — un-check it there by hand first, then remove it here confirming that');
+  const run = db.transaction(() => {
+    db.prepare('DELETE FROM push_queue WHERE completion_id = ?').run(id);
+    db.prepare('DELETE FROM completions WHERE id = ?').run(id);
+    if (pushed) db.prepare('UPDATE ahg_state SET completed = 0, earned_on = NULL, comment = NULL WHERE girl_id = ? AND requirement_id = ?').run(c.girl_id, c.requirement_id);
+    auditRow(db, actor, pushed ? 'completion.delete_after_ahg_removal' : 'completion.delete', id,
+      { girlId: c.girl_id, requirementId: c.requirement_id, status: c.status, pushed: !!pushed }, null);
+  });
+  run();
 }
 
 // ---------------------------------------------------------------- progress --
@@ -336,7 +347,7 @@ function badgeStatusFor(db, girlId, badgeId) {
   return { status: complete ? 'complete' : confirmed.size ? 'in_progress' : 'not_started', confirmedCount: confirmed.size };
 }
 
-const stateRows = (db, girlId, badgeId) => db.prepare(`SELECT c.requirement_id, c.status, c.completed_on, c.source, c.needs_review
+const stateRows = (db, girlId, badgeId) => db.prepare(`SELECT c.id, c.requirement_id, c.status, c.completed_on, c.source, c.needs_review, c.notes
   FROM completions c JOIN requirements r ON r.id = c.requirement_id
   WHERE c.girl_id = ? AND r.badge_id = ? AND c.status <> 'rejected'`).all(girlId, badgeId);
 
@@ -358,8 +369,11 @@ function girlProgress(db, girl, { levelGroup = null } = {}) {
           letter: r.letter,
           title: r.title,
           state: c ? c.status : 'none',
+          completionId: c ? c.id : null,
           completedOn: c ? c.completed_on : null,
           source: c ? c.source : null,
+          notes: c ? c.notes : null,
+          pushed: c ? !!db.prepare("SELECT 1 FROM push_queue WHERE completion_id = ? AND status = 'sent'").get(c.id) : false,
           needsReview: c ? !!c.needs_review : false,
         };
       }),

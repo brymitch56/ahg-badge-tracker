@@ -378,7 +378,9 @@ test('scheduler: weekly push only while push_enabled and something is queued; on
   const mailer = async (cfg, m) => { mails.push(m); };
   const mcfg = { ...rcfg, mail: { smtpUrl: 'smtp://fake', from: 'tracker@example.org', to: ['coord@example.org'] } };
   const sched = makeScheduler({ cfg: mcfg, db: rdb, client: makeCheckinClient({ base: '', apiKey: '' }), credKey: KEY, ahgSessionFactory: reqSessionFactory, mailer, log: () => {} });
-  const t0 = Date.parse('2026-09-20T08:00:00Z');
+  // relative to now: earlier tests in this file already recorded push runs at real time,
+  // and the weekly gate measures from the last ok run
+  const t0 = Date.now() + 8 * 24 * 3600e3;
   servicepush.setPushEnabled(rdb, false, 'admin@example.com');
   let out = await sched.tick(t0);
   assert.equal(out.push, undefined, 'flag off: nothing');

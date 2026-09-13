@@ -241,7 +241,11 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
   });
   api.delete('/completions/:id', leader, (req, res) => {
     try {
-      proposals.deleteCompletion(db, Number(req.params.id), req.user.email);
+      // ?afterAhgRemoval=1: the leader states the item was already un-checked
+      // on AHGFamily by hand — admin only, since it clears a sent push row.
+      const after = req.query.afterAhgRemoval === '1';
+      if (after && req.user.role !== 'admin') return res.status(403).json({ error: 'forbidden', detail: 'admin only' });
+      proposals.deleteCompletion(db, Number(req.params.id), req.user.email, { afterAhgRemoval: after });
       return res.json({ ok: true });
     } catch (err) { return completionErr(res, err); }
   });

@@ -384,3 +384,38 @@ test('review queue: past events only, grouped by event/girl, level-group filter,
   db.prepare('DELETE FROM completions WHERE event_id = ?').run(future);
   db.prepare('DELETE FROM events WHERE id = ?').run(future);
 });
+
+test('deleteCompletion: a pushed completion is refused unless the leader states it was un-checked on AHGFamily; then queue + mirror are cleared', async () => {
+  const sdb = openDb(':memory:');
+  migrate(sdb);
+  catalog.importFromDir(sdb, badgesDir, { actor: 'admin@example.com' });
+  const g = Number(sdb.prepare("INSERT INTO girls (first_name, last_name, level, ahg_level, active, updated_at) VALUES ('Hal','Ives','Pioneer','Pioneer',1,?)").run(new Date().toISOString()).lastInsertRowid);
+  const c = proposals.manualCompletion(sdb, { girlId: g, requirementId: 'example-badge-pipa:1', completedOn: '2026-09-01', notes: 'test' }, 'leader@example.com');
+  sdb.prepare("INSERT INTO push_queue (girl_id, requirement_id, badge_id, completion_id, action, date, status, created_at, sent_at) VALUES (?, 'example-badge-pipa:1', 'example-badge-pipa', ?, 'mark', '2026-09-01', 'sent', ?, ?)").run(g, c.id, new Date().toISOString(), new Date().toISOString());
+  sdb.prepare("INSERT INTO ahg_state (girl_id, requirement_id, completed, earned_on, comment, fetched_at) VALUES (?, 'example-badge-pipa:1', 1, '2026-09-01', 'tracker: x', ?)").run(g, new Date().toISOString());
+  assert.throws(() => proposals.deleteCompletion(sdb, c.id, 'leader@example.com'), (e) => e.status === 409 && /un-check it there by hand first/.test(e.message));
+  assert.equal(sdb.prepare('SELECT COUNT(*) n FROM completions WHERE id = ?').get(c.id).n, 1, 'still there');
+  proposals.deleteCompletion(sdb, c.id, 'admin@example.com', { afterAhgRemoval: true });
+  assert.equal(sdb.prepare('SELECT COUNT(*) n FROM completions WHERE id = ?').get(c.id).n, 0);
+  assert.equal(sdb.prepare('SELECT COUNT(*) n FROM push_queue WHERE completion_id = ?').get(c.id).n, 0);
+  assert.deepEqual(sdb.prepare("SELECT completed, comment FROM ahg_state WHERE girl_id = ? AND requirement_id = 'example-badge-pipa:1'").get(g), { completed: 0, comment: null }, 'mirror reset so the next pull does not re-propose');
+  assert.equal(sdb.prepare("SELECT action FROM audit_log ORDER BY id DESC LIMIT 1").get().action, 'completion.delete_after_ahg_removal');
+  // the API: a leader cannot use the override, an admin can
+  const app2 = createApp({ cfg, db: sdb, jwks });
+  const srv = await new Promise((r) => { const s = app2.listen(0, '127.0.0.1', () => r(s)); });
+  try {
+    const c2 = proposals.manualCompletion(sdb, { girlId: g, requirementId: 'example-badge-pipa:2', completedOn: '2026-09-01' }, 'leader@example.com');
+    sdb.prepare("INSERT INTO push_queue (girl_id, requirement_id, badge_id, completion_id, action, date, status, created_at, sent_at) VALUES (?, 'example-badge-pipa:2', 'example-badge-pipa', ?, 'mark', '2026-09-01', 'sent', ?, ?)").run(g, c2.id, new Date().toISOString(), new Date().toISOString());
+    const b2 = `http://127.0.0.1:${srv.address().port}`;
+    const lt = await token({ groups: [GROUP], preferred_username: 'leader@example.com' });
+    const at = await token({ groups: [GROUP], preferred_username: 'admin@example.com' });
+    assert.equal((await fetch(`${b2}/api/v1/completions/${c2.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${lt}` } })).status, 409);
+    assert.equal((await fetch(`${b2}/api/v1/completions/${c2.id}?afterAhgRemoval=1`, { method: 'DELETE', headers: { Authorization: `Bearer ${lt}` } })).status, 403);
+    assert.equal((await fetch(`${b2}/api/v1/completions/${c2.id}?afterAhgRemoval=1`, { method: 'DELETE', headers: { Authorization: `Bearer ${at}` } })).status, 200);
+    // girlProgress surfaces completionId / notes / pushed for the page
+    const c3 = proposals.manualCompletion(sdb, { girlId: g, requirementId: 'example-badge-pipa:3', completedOn: '2026-09-01', notes: 'photo' }, 'leader@example.com');
+    const prog = proposals.girlProgress(sdb, sdb.prepare('SELECT * FROM girls WHERE id = ?').get(g));
+    const r3 = prog.flatMap((b) => b.groups).flatMap((gr) => gr.requirements).find((r) => r.requirementId === 'example-badge-pipa:3');
+    assert.deepEqual({ id: r3.completionId, notes: r3.notes, pushed: r3.pushed, source: r3.source }, { id: c3.id, notes: 'photo', pushed: false, source: 'manual' });
+  } finally { srv.close(); sdb.close(); }
+});
