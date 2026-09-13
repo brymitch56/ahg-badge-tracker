@@ -62,8 +62,6 @@ Ids stay in `data/captures/step5b-notes.md` (gitignored), never in git.
 | `date-` stored and read back verbatim? | Yes — `09/13/2026` visible on AHGFamily after the first push. | 2026-09-13 |
 | Comment limit / special characters | Short note (`tracker: Completed at home 09/13/2026`) stored verbatim. Limit and `| — & ' "` still untested. | 2026-09-13 |
 | Echoing a checked item keeps it checked? | | |
-| `date-` stored and read back verbatim? | | |
-| Comment limit / special characters | | |
 | Other items and panels untouched? | | |
 | Badge-level roll-up on AHGFamily? | | |
 
