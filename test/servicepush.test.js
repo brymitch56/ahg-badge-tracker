@@ -235,7 +235,9 @@ function exampleBuilt() {
 const freshItems = () => ({ r00000test01: { checked: false, date: '', comment: '' }, r00000test02: { checked: true, date: '08/01/2026', comment: 'hand-entered' }, r00000test03: { checked: false, date: '', comment: '' }, r00000test04: { checked: false, date: '', comment: '' } });
 const req = { items: freshItems(), saves: 0, fetches: 0, swallow: false, corrupt: false, bodies: [] };
 const resetReq = () => Object.assign(req, { items: freshItems(), saves: 0, fetches: 0, swallow: false, corrupt: false, bodies: [] });
-const reqPanel = (id, it) => `<div><input type="checkbox" name="checkbox-${id}" value="1"${it.checked ? ' checked' : ''}><input type="text" name="date-${id}" value="${it.date}"><textarea name="comment-${id}">${it.comment}</textarea></div>`;
+// Live shape (2026-09-13): the "checkbox" is a Krajee checkbox-x — a text
+// input whose value is "0"/"1" — not an <input type="checkbox">.
+const reqPanel = (id, it) => `<div><input type="text" id="checkbox-${id}" class="cbx-loading" name="checkbox-${id}" value="${it.checked ? '1' : '0'}" data-krajee-checkboxX="checkboxX_1"><input type="text" name="date-${id}" class="form-control krajee-datepicker" value="${it.date}"><textarea name="comment-${id}">${it.comment}</textarea></div>`;
 const reqSessionFactory = async () => ({
   async standard(awardId) {
     req.fetches += 1;
@@ -248,7 +250,7 @@ const reqSessionFactory = async () => ({
     if (req.swallow) return { status: 200, html: '' };
     const byName = new Map(bodyPairs);
     for (const id of Object.keys(req.items)) {
-      req.items[id] = { checked: byName.has(`checkbox-${id}`), date: byName.get(`date-${id}`) || '', comment: byName.get(`comment-${id}`) || '' };
+      req.items[id] = { checked: byName.get(`checkbox-${id}`) === '1', date: byName.get(`date-${id}`) || '', comment: byName.get(`comment-${id}`) || '' };
     }
     if (req.corrupt) req.items.r00000test02.date = '01/01/2000';
     return { status: 302, html: '' };
@@ -300,13 +302,18 @@ function confirmedWithNote() {
   return c;
 }
 
-test('unit: fragmentPairs forces a checkbox on with its own value, sets date/comment, echoes the rest', () => {
+test('unit: the live checkbox-x text widget — parse reads value "1" as checked; fragmentPairs sets it to "1" and echoes the rest', () => {
   const html = `<form>${reqPanel('r00000test01', { checked: false, date: '', comment: '' })}${reqPanel('r00000test02', { checked: true, date: '08/01/2026', comment: 'hand &amp; entered' })}</form>`;
-  const pairs = servicepush.fragmentPairs(html, { check: ['checkbox-r00000test01'], set: { 'date-r00000test01': '09/08/2026', 'comment-r00000test01': 'note' } });
+  const st = require('../lib/parse').parseStandardState(html, { awardId: 'aw0000example' });
+  assert.deepEqual({ a: st.items.r00000test01.checked, b: st.items.r00000test02.checked }, { a: false, b: true });
+  const pairs = servicepush.fragmentPairs(html, { check: ['checkbox-r00000test01'], set: { 'checkbox-r00000test01': '1', 'date-r00000test01': '09/08/2026', 'comment-r00000test01': 'note' } });
   assert.deepEqual(pairs, [
     ['checkbox-r00000test01', '1'], ['date-r00000test01', '09/08/2026'], ['comment-r00000test01', 'note'],
     ['checkbox-r00000test02', '1'], ['date-r00000test02', '08/01/2026'], ['comment-r00000test02', 'hand & entered'],
   ]);
+  // a real <input type="checkbox"> still works through `check`
+  const real = '<form><input type="checkbox" name="checkbox-r00000test03" value="1"><input type="checkbox" name="checkbox-r00000test04" value="1" checked></form>';
+  assert.deepEqual(servicepush.fragmentPairs(real, { check: ['checkbox-r00000test03'] }), [['checkbox-r00000test03', '1'], ['checkbox-r00000test04', '1']]);
 });
 
 test('requirement push: OFF without its own flag even when push_enabled is on', async () => {
@@ -335,7 +342,7 @@ test('requirement push: checks the box, writes her date and the note, echoes eve
   assert.equal(body.get('comment-r00000test01'), `tracker: 09/08/2026 Meeting Two — Presented it | Leader verified full completion (missed planned session 09/01/2026): Finished the first half at home — leader@example.com, ${today}`);
   assert.equal(body.get('checkbox-r00000test02'), '1', 'the hand-entered item is echoed checked');
   assert.equal(body.get('comment-r00000test02'), 'hand-entered');
-  assert.equal(body.has('checkbox-r00000test03'), false, 'unchecked items contribute no checkbox');
+  assert.equal(body.get('checkbox-r00000test03'), '0', 'an unchecked widget is echoed as 0, never flipped');
   assert.equal(body.get('youth-select[]'), Y_BEA);
   assert.equal(body.get('badge-select'), 'aw0000example');
   assert.equal(rdb.prepare('SELECT status FROM push_queue WHERE id = ?').get(id).status, 'sent');

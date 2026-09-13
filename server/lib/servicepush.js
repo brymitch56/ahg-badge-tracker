@@ -322,7 +322,11 @@ async function pushRequirementMarks(db, cfg, { sessionFactory = ahgpull.makeLive
         const pageHtml = await session.page('/advancement/index?level=all&style=standard');
         const outer = serializeForm(pageHtml).filter(([n]) => !/^(youth-select\[\]|badge-select)$/.test(n) && !/^(checkbox|date|comment|new|completed_on|awarded_on|purchased)-[a-z0-9]{12}$/.test(n));
         const body = [...outer, ['youth-select[]', girl.ahg_youth_id], ['badge-select', row.award_id],
-          ...fragmentPairs(beforeHtml, { check: [`checkbox-${reqId}`], set: { [`date-${reqId}`]: formDate, [`comment-${reqId}`]: note } })];
+          // checkbox-<rid> is a Krajee checkbox-x: a TEXT input whose value is
+          // "0"/"1" (step 5b, 2026-09-13 — sending it as a checkbox left the
+          // item unchecked). Set its value to "1"; `check` still covers a real
+          // checkbox should the markup ever change back.
+          ...fragmentPairs(beforeHtml, { check: [`checkbox-${reqId}`], set: { [`checkbox-${reqId}`]: '1', [`date-${reqId}`]: formDate, [`comment-${reqId}`]: note } })];
 
         await session.save(body);
         const after = parseStandardState(await session.standard(row.award_id, girl.ahg_youth_id), { awardId: row.award_id });

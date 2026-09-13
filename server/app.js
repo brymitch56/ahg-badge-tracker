@@ -322,6 +322,17 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
     }
     return undefined;
   });
+  // A held row goes back to the queue only by an admin's hand, after looking
+  // at AHGFamily — the tracker itself never retries an unconfirmed save.
+  api.post('/sync/queue/:id/requeue', admin, (req, res) => {
+    const q = db.prepare('SELECT * FROM push_queue WHERE id = ?').get(Number(req.params.id));
+    if (!q) return res.status(404).json({ error: 'not found' });
+    if (q.status !== 'held' && q.status !== 'failed') return res.status(409).json({ error: `row is ${q.status}, not held/failed` });
+    db.prepare("UPDATE push_queue SET status = 'queued', last_error = NULL WHERE id = ?").run(q.id);
+    db.prepare('INSERT INTO audit_log (at, actor, action, entity, entity_id, before, after) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(new Date().toISOString(), req.user.email, 'push.requeue', 'push_queue', String(q.id), JSON.stringify({ status: q.status, error: q.last_error }), JSON.stringify({ status: 'queued' }));
+    return res.json({ ok: true, id: q.id });
+  });
   api.get('/sync/queue', leader, (req, res) => {
     const rows = db.prepare(`SELECT q.*, g.first_name, g.last_name, b.name AS badge_name, r.number, r.letter, r.title
                              FROM push_queue q JOIN girls g ON g.id = q.girl_id
