@@ -262,3 +262,38 @@ test('POST /events/:id/plans/move: plans (and their items) move to the target; a
   assert.equal(movedPlan.items.length, itemsBefore, 'items came along (however many there were)');
   assert.ok(db.prepare("SELECT 1 FROM audit_log WHERE action = 'plan.move' AND actor = 'leader@example.com'").get());
 });
+
+test('GET /badges/:id/plan-state?unit=: unplanned / started / planned per requirement with every planned date; other units and other badges do not bleed', async () => {
+  // own database: the shared one carries plans from the tests above
+  const sdb = openDb(':memory:');
+  migrate(sdb);
+  catalog.importFromDir(sdb, badgesDir, { actor: 'admin@example.com' });
+  const ev = (id, start, title) => Number(sdb.prepare("INSERT INTO events (checkin_event_id, ical_uid, start_at, end_at, title, updated_at) VALUES (?, ?, ?, ?, ?, '2026-09-01T00:00:00Z')").run(id, `uid-ps-${id}@example.com`, start, start, title).lastInsertRowid);
+  const ev2 = ev(9077, '2026-10-06T23:00:00.000Z', 'Later Meeting');
+  const ev3 = ev(9078, '2026-10-13T23:00:00.000Z', 'Latest Meeting');
+  const app2 = createApp({ cfg: makeConfig({ MSAL_TENANT_ID: TENANT, MSAL_CLIENT_ID: CLIENT, LEADER_GROUP_ID: GROUP, DB_PATH: ':memory:', BADGES_DIR: badgesDir }), db: sdb, jwks });
+  const srv = await new Promise((r) => { const s = app2.listen(0, '127.0.0.1', () => r(s)); });
+  const b2 = `http://127.0.0.1:${srv.address().port}`;
+  const t = await token({ groups: [GROUP], preferred_username: 'leader@example.com' });
+  const call = (p, init = {}) => fetch(b2 + p, { ...init, headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' } });
+  const putP = (p, body) => call(p, { method: 'PUT', body: JSON.stringify(body) });
+  const lg = encodeURIComponent('Pioneer/Patriot');
+  try {
+    // :1 planned as a session at ev2; :2 started at ev2 and continued at ev3 (never finished); :3/:4 untouched
+    assert.equal((await putP(`/api/v1/events/${ev2}/plans/${lg}`, { items: [{ requirementId: 'example-badge-pipa:1', role: 'session', notes: 'campfire' }, { requirementId: 'example-badge-pipa:2', role: 'start' }] })).status, 200);
+    assert.equal((await putP(`/api/v1/events/${ev3}/plans/${lg}`, { items: [{ requirementId: 'example-badge-pipa:2', role: 'continue' }] })).status, 200);
+    let r = await call(`/api/v1/badges/example-badge-pipa/plan-state?unit=${lg}`);
+    assert.equal(r.status, 200);
+    const s = await r.json();
+    assert.equal(s['example-badge-pipa:1'].state, 'planned');
+    assert.deepEqual(s['example-badge-pipa:1'].sessions.map((x) => [x.eventId, x.role, x.notes, x.title]), [[ev2, 'session', 'campfire', 'Later Meeting']]);
+    assert.equal(s['example-badge-pipa:2'].state, 'started');
+    assert.deepEqual(s['example-badge-pipa:2'].sessions.map((x) => [x.eventId, x.role]), [[ev2, 'start'], [ev3, 'continue']], 'every planned date, in order');
+    assert.deepEqual(s['example-badge-pipa:4'], { state: 'unplanned', sessions: [] });
+    // a plan for another unit is not this unit's history
+    r = await call(`/api/v1/badges/example-badge-pipa/plan-state?unit=${encodeURIComponent('Tenderheart')}`);
+    assert.equal((await r.json())['example-badge-pipa:1'].state, 'unplanned');
+    assert.equal((await call('/api/v1/badges/example-badge-pipa/plan-state?unit=Nope')).status, 400);
+    assert.equal((await call(`/api/v1/badges/no-such-badge/plan-state?unit=${lg}`)).status, 404);
+  } finally { srv.close(); sdb.close(); }
+});

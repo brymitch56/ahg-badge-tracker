@@ -102,6 +102,16 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
     if (!b) return res.status(404).json({ error: 'not found' });
     return res.json(b);
   });
+  // Planning history per requirement for one unit (the planner's picker).
+  api.get('/badges/:id/plan-state', leader, (req, res) => {
+    if (!catalog.getBadge(db, req.params.id)) return res.status(404).json({ error: 'not found' });
+    try {
+      return res.json(plans.requirementPlanState(db, req.params.id, String(req.query.unit || '')));
+    } catch (e) {
+      if (e instanceof plans.PlanError) return res.status(e.status).json({ error: e.message });
+      throw e;
+    }
+  });
 
   // -------------------------------------------- roster & events (mirror) --
   const girlOut = (g) => ({

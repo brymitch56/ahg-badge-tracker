@@ -62,6 +62,36 @@ const planOut = (db, p) => ({
   })),
 });
 
+/**
+ * Planning history per requirement of one badge for one unit — what the
+ * planner's picker shows beside each requirement so the leader can tell an
+ * unplanned requirement from one already on the calendar. Nothing is hidden
+ * (a repeat can be deliberate); the state just says where it stands:
+ *   unplanned — no plan item for this unit
+ *   started   — planned as start/continue only (no session/finish yet)
+ *   planned   — a session or finish exists
+ * `sessions` lists every planned meeting, in date order, with its role.
+ */
+function requirementPlanState(db, badgeId, levelGroup) {
+  if (!PLAN_LEVEL_GROUPS.includes(levelGroup)) throw new PlanError(400, `unit must be one of ${PLAN_LEVEL_GROUPS.join(' | ')}`);
+  const rows = db.prepare(`
+    SELECT pi.requirement_id, pi.role, pi.notes, e.id AS event_id, e.title, e.start_at, e.removed_from_feed
+    FROM plan_items pi JOIN plans p ON p.id = pi.plan_id JOIN events e ON e.id = p.event_id
+    JOIN requirements r ON r.id = pi.requirement_id
+    WHERE r.badge_id = ? AND p.level_group = ? ORDER BY e.start_at, e.id`).all(badgeId, levelGroup);
+  const out = {};
+  for (const r of db.prepare('SELECT id FROM requirements WHERE badge_id = ? AND active = 1').all(badgeId)) out[r.id] = { state: 'unplanned', sessions: [] };
+  for (const x of rows) {
+    if (!out[x.requirement_id]) continue;
+    out[x.requirement_id].sessions.push({ eventId: x.event_id, date: x.start_at, title: x.title, role: x.role, notes: x.notes || null, removedFromFeed: !!x.removed_from_feed });
+  }
+  for (const v of Object.values(out)) {
+    if (!v.sessions.length) continue;
+    v.state = v.sessions.some((s) => s.role === 'session' || s.role === 'finish') ? 'planned' : 'started';
+  }
+  return out;
+}
+
 /** Every plan for one event, items included, in level-group order. */
 function getPlans(db, eventId) {
   return db.prepare('SELECT * FROM plans WHERE event_id = ? ORDER BY level_group').all(eventId)
@@ -310,4 +340,4 @@ function movePlans(db, fromEvent, toEvent, actor) {
   return { moved, skipped };
 }
 
-module.exports = { PLAN_LEVEL_GROUPS, ROLES, badgeAllowedInPlan, PlanError, getPlans, putPlan, movePlans, yearOverview, yearBadgeDetail };
+module.exports = { PLAN_LEVEL_GROUPS, ROLES, badgeAllowedInPlan, PlanError, getPlans, putPlan, movePlans, yearOverview, yearBadgeDetail, requirementPlanState };
