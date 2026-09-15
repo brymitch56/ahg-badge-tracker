@@ -1,8 +1,9 @@
 'use strict';
 // Service Stars: stars awarded on Pathfinder hours before the troop stopped
 // counting them (ruling Sept 2026), and a leader's call on other extra stars.
-// The awarded stars stand; Pathfinder hours count only to cover them; new
-// stars need counted hours beyond them. Invented names and ids only.
+// The awarded stars stand; the Pathfinder hours they needed stay counted as a
+// fixed credit, so every later counted hour goes toward the next star; no
+// other Pathfinder hours ever count. Invented names and ids only.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { generateKeyPair, exportJWK, SignJWT, createLocalJWKSet } = require('jose');
@@ -24,27 +25,32 @@ const TH = (hours, pf, baseline, onRecord) => St.computeStarChain({
 
 // ------------------------------------------------------------------ math --
 test('Pathfinder stars stand; a 3rd star covered by Pathfinder hours is not stacked on top of counted hours', () => {
-  // 14 h counted at baseline, 3 on record, 9.5 h Pathfinder → 1 star on Pathfinder hours
+  // 14 h counted at baseline, 3 on record, 9.5 h Pathfinder → 1 star needed 1 h of it
   const base = { onRecord: 3, earnable: 2, hours: 1400 };
   let l = TH(1550, 950, base, 3); // after a 1.5 h meeting
   assert.deepEqual(
-    { earnable: l.earnable, legacy: l.legacy, expected: l.expected, newStars: l.newStars, covered: l.coveredStars, credit: l.pathfinderCredit, conflict: l.conflict },
-    { earnable: 3, legacy: 0, expected: 3, newStars: 0, covered: 1, credit: 0, conflict: null },
+    { earnable: l.earnable, legacy: l.legacy, expected: l.expected, newStars: l.newStars, covered: l.coveredStars, credit: l.pathfinderCredit, carryOut: l.carryOut, conflict: l.conflict },
+    { earnable: 3, legacy: 0, expected: 3, newStars: 0, covered: 1, credit: 100, carryOut: 150, conflict: null },
+    'the whole 1.5 h meeting counts toward the next star',
   );
-  assert.equal(TH(1950, 950, base, 3).newStars, 0, '19.5 counted hours: still 3');
-  l = TH(2000, 950, base, 3);
-  assert.deepEqual({ expected: l.expected, newStars: l.newStars, carryOut: l.carryOut }, { expected: 4, newStars: 1, carryOut: 0 }, 'the 4th star needs 20 counted hours');
+  assert.equal(TH(1850, 950, base, 3).newStars, 0, '18.5 counted hours: still 3');
+  l = TH(1900, 950, base, 3);
+  assert.deepEqual({ expected: l.expected, newStars: l.newStars, carryOut: l.carryOut, credit: l.pathfinderCredit }, { expected: 4, newStars: 1, carryOut: 0, credit: 100 },
+    'the 4th star at 19 counted hours — the 1 h of Pathfinder credit stays counted');
   // the same girl WITHOUT Pathfinder hours keeps the old legacy behaviour (paper-era star on top)
   assert.equal(TH(1550, 0, base, 3).expected, 4);
 });
 
-test('the credit fills only up to the stars on record and shrinks to nothing as counted hours catch up', () => {
-  const base = { onRecord: 3, earnable: 2, hours: 1100 }; // 11 h counted, 7.5 h Pathfinder
-  let l = TH(1250, 750, base, 3);
-  assert.deepEqual({ credit: l.pathfinderCredit, available: l.available, earnable: l.earnable, carryOut: l.carryOut, expected: l.expected, newStars: l.newStars },
-    { credit: 250, available: 1500, earnable: 3, carryOut: 0, expected: 3, newStars: 0 });
+test('the Pathfinder credit is fixed at what the awarded stars needed — never more, and it never shrinks', () => {
+  const base = { onRecord: 3, earnable: 2, hours: 1100 }; // 11 h counted, 7.5 h Pathfinder → 4 h needed
+  let l = TH(1100, 750, base, 3);
+  assert.deepEqual({ credit: l.pathfinderCredit, available: l.available, earnable: l.earnable, carryOut: l.carryOut }, { credit: 400, available: 1500, earnable: 3, carryOut: 0 });
+  l = TH(1250, 750, base, 3); // +1.5 h
+  assert.deepEqual({ credit: l.pathfinderCredit, available: l.available, carryOut: l.carryOut, expected: l.expected }, { credit: 400, available: 1650, carryOut: 150, expected: 3 });
   l = TH(1600, 750, base, 3);
-  assert.deepEqual({ credit: l.pathfinderCredit, carryOut: l.carryOut }, { credit: 0, carryOut: 100 }, 'no Pathfinder hours carry once counted hours cover the stars');
+  assert.deepEqual({ credit: l.pathfinderCredit, expected: l.expected, newStars: l.newStars }, { credit: 400, expected: 4, newStars: 1 }, 'the 4th star at 16 counted hours');
+  // Pathfinder hours beyond what the stars needed never count
+  assert.equal(TH(1100, 5000, base, 3).pathfinderCredit, 400);
 });
 
 test('Pathfinder hours that explain only some extra stars cover those; the rest stay legacy', () => {
@@ -56,12 +62,12 @@ test('Pathfinder hours that explain only some extra stars cover those; the rest 
 
 test('counted hours dropping below the baseline still surface as a conflict', () => {
   const l = TH(800, 750, { onRecord: 3, earnable: 2, hours: 1100 }, 3);
-  assert.equal(l.pathfinderCredit, 500, 'the credit never exceeds the covered stars\' worth');
+  assert.equal(l.pathfinderCredit, 400, 'the credit stays what the stars needed');
   assert.equal(l.expected, 2);
   assert.deepEqual(l.conflict, { kind: 'more_on_record', onRecord: 3, expected: 2, unexplained: 1 });
 });
 
-test('a leader\'s "count against her hours" choice: extra stars are no longer stacked', () => {
+test('a leader\'s "count against her hours" choice: extra stars are earned back before the next one', () => {
   // 42.25 h Tenderheart → 8 stars, 2.25 carry; Explorer 1 on record at 8.75 h
   const run = (explorerHours, legacyMode, onRecordEx = 1) => St.computeStarChain({
     hoursByLevel: { Tenderheart: 4225, Explorer: explorerHours },
@@ -73,7 +79,7 @@ test('a leader\'s "count against her hours" choice: extra stars are no longer st
   assert.deepEqual({ expected: l.expected, newStars: l.newStars, legacyMode: l.legacyMode, credit: l.credit, pfCredit: l.pathfinderCredit, unexplained: l.unexplainedExtras },
     { expected: 1, newStars: 0, legacyMode: 'hours', credit: 0, pfCredit: 0, unexplained: 1 });
   l = run(500, 'hours'); // fewer hours than the star she holds: covered, not a conflict
-  assert.deepEqual({ available: l.available, expected: l.expected, conflict: l.conflict }, { available: 1000, expected: 1, conflict: null });
+  assert.deepEqual({ available: l.available, credit: l.credit, expected: l.expected, conflict: l.conflict }, { available: 1000, credit: 275, expected: 1, conflict: null });
   assert.equal(run(1800, 'hours').expected, 2, 'the 2nd Explorer star once the hours earn it');
 });
 
@@ -140,7 +146,7 @@ test.before(async () => {
   addBaseline(pia, 'Tenderheart', 3, 2, 1400);
   piaProposal = addProposal(pia, 'Tenderheart', 4);
 
-  // Lo: 3 stars, 12.5 h counted, 7.5 h Pathfinder — the credit is visible
+  // Lo: 3 stars, 11 h counted at baseline, 12.5 h now, 7.5 h Pathfinder — the credit is visible
   lo = addGirl('Lo', 'Tenderheart', 'upftest00002');
   addHours(lo, 'Tenderheart', 1250);
   addHours(lo, 'Pathfinder', 750);
@@ -166,10 +172,10 @@ test('reconcile withdraws a star proposal that only Pathfinder hours ever suppor
   assert.deepEqual(proposal(piaProposal), { status: 'withdrawn', notes: 'withdrawn: approved hours no longer support this star' });
   assert.equal(r.conflicts, 0);
 
-  addHours(pia, 'Tenderheart', 400); // 19.5 h counted
+  addHours(pia, 'Tenderheart', 300); // 18.5 h counted + 1 h credit
   r = servicepull.reconcileGirl(db, girlRow(pia), { fetchedLevels: ['Tenderheart'] });
   assert.equal(r.proposed, 0);
-  addHours(pia, 'Tenderheart', 50); // 20 h counted
+  addHours(pia, 'Tenderheart', 50); // 19 h counted + 1 h credit = 20
   r = servicepull.reconcileGirl(db, girlRow(pia), { fetchedLevels: ['Tenderheart'] });
   assert.equal(r.proposed, 1, 'a withdrawn proposal never blocks the real star');
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM star_proposals WHERE girl_id = ? AND ordinal = 4 AND status = 'proposed'").get(pia).n, 1);
@@ -178,8 +184,8 @@ test('reconcile withdraws a star proposal that only Pathfinder hours ever suppor
 test('stars view shows the Pathfinder credit and covered stars; other extra stars offer the leader\'s choice', async () => {
   const v = (await call('GET', '/api/v1/stars', leaderT)).json;
   const th = (id) => v.girls.find((g) => g.id === id).levels.find((l) => l.level === 'Tenderheart');
-  assert.deepEqual({ credit: th(lo).pathfinderCredit, covered: th(lo).coveredStars, unexplained: th(lo).unexplainedExtras, earnable: th(lo).earnable, newStars: th(lo).newStars },
-    { credit: 2.5, covered: 1, unexplained: 0, earnable: 3, newStars: 0 });
+  assert.deepEqual({ credit: th(lo).pathfinderCredit, covered: th(lo).coveredStars, unexplained: th(lo).unexplainedExtras, earnable: th(lo).earnable, carryOut: th(lo).carryOut, newStars: th(lo).newStars },
+    { credit: 4, covered: 1, unexplained: 0, earnable: 3, carryOut: 1.5, newStars: 0 });
   const ex = v.girls.find((g) => g.id === lu).levels.find((l) => l.level === 'Explorer');
   assert.deepEqual({ unexplained: ex.unexplainedExtras, mode: ex.legacyMode, expected: ex.expected }, { unexplained: 1, mode: 'separate', expected: 2 });
 });
