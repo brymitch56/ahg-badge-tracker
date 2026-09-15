@@ -9,6 +9,7 @@ const { makeCheckinClient, CheckinError } = require('./lib/checkin');
 const mirror = require('./lib/mirror');
 const { verifySignature, markDelivery } = require('./lib/webhook');
 const mapping = require('./lib/mapping');
+const girlmerge = require('./lib/girlmerge');
 const credcrypto = require('./lib/credcrypto');
 const plans = require('./lib/plans');
 const proposals = require('./lib/proposals');
@@ -439,13 +440,37 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
   api.get('/admin/mapping', admin, (req, res) => {
     const v = mapping.mappingView(db);
     const byYouthId = new Map(v.girls.filter((g) => g.ahg_youth_id).map((g) => [g.ahg_youth_id, g.id]));
+    // ids still held by old, inactive records (duplicates, deleted girls):
+    // mapping one to a current girl is refused until it's merged or released
+    const heldByOld = new Map(db.prepare('SELECT id, ahg_youth_id FROM girls WHERE active = 0 AND ahg_youth_id IS NOT NULL').all()
+      .map((g) => [g.ahg_youth_id, g.id]));
     res.json({
       fetchedAt: v.stored ? v.stored.fetchedAt : null,
       latched: !!mapping.getLatch(db),
-      youth: v.stored ? v.stored.youth.map((y) => ({ ...y, girlId: byYouthId.get(y.id) ?? null })) : [],
+      youth: v.stored ? v.stored.youth.map((y) => ({ ...y, girlId: byYouthId.get(y.id) ?? null, heldByOldGirlId: heldByOld.get(y.id) ?? null })) : [],
       unmappedGirls: v.unmapped.map((g) => ({ id: g.id, firstName: g.first_name, lastName: g.last_name, nickname: g.nickname, ahgLevel: g.ahg_level })),
       suggestions: v.suggestions,
+      duplicates: girlmerge.duplicateView(db),
     });
+  });
+
+  // Duplicate / old girl records (lib/girlmerge.js): merge an inactive
+  // record into the girl's current one, or release its AHGFamily id.
+  api.post('/admin/girls/merge', admin, (req, res) => {
+    try {
+      return res.json(girlmerge.mergeGirls(db, req.body || {}, req.user.email));
+    } catch (e) {
+      if (e instanceof girlmerge.MergeError) return res.status(e.status).json({ error: e.message });
+      throw e;
+    }
+  });
+  api.post('/admin/girls/:id/release-youth-id', admin, (req, res) => {
+    try {
+      return res.json(girlmerge.releaseYouthId(db, req.params.id, req.user.email));
+    } catch (e) {
+      if (e instanceof girlmerge.MergeError) return res.status(e.status).json({ error: e.message });
+      throw e;
+    }
   });
 
   api.post('/admin/mapping/refresh', admin, async (req, res) => {

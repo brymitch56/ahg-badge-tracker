@@ -172,7 +172,11 @@ function confirmMappings(db, pairs, actor) {
       if (!/^u[a-z0-9]{11}$/i.test(String(p.ahgYouthId || ''))) throw Object.assign(new Error(`girl ${p.girlId}: ahgYouthId must be a u… hashid`), { code: 'bad' });
       const id = p.ahgYouthId.toLowerCase();
       if (g.ahg_youth_id) throw Object.assign(new Error(`girl ${p.girlId} is already mapped`), { code: 'conflict' });
-      if (db.prepare('SELECT 1 FROM girls WHERE ahg_youth_id = ?').get(id)) throw Object.assign(new Error(`${id} is already mapped to another girl`), { code: 'conflict' });
+      const holder = db.prepare('SELECT first_name, last_name, active FROM girls WHERE ahg_youth_id = ?').get(id);
+      if (holder && holder.active) throw Object.assign(new Error(`${id} is already mapped to another girl`), { code: 'conflict' });
+      if (holder) {
+        throw Object.assign(new Error(`${id} is still held by an old, inactive record for ${holder.first_name} ${holder.last_name} — merge or release it under "Old records still holding data", then map again`), { code: 'conflict' });
+      }
       db.prepare("UPDATE girls SET ahg_youth_id = ?, ahg_youth_id_source = 'mapped', updated_at = ? WHERE id = ?")
         .run(id, new Date().toISOString(), g.id);
       db.prepare('INSERT INTO audit_log (at, actor, action, entity, entity_id, before, after) VALUES (?, ?, ?, ?, ?, ?, ?)')
