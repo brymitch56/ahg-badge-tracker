@@ -203,10 +203,14 @@ function audit(db, actor, event, levelGroup, before, after, at) {
  * start/continue-only requirements are counted separately (nothing
  * completes there yet).
  */
-function yearOverview(db, { from, to }) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(from || '') || !/^\d{4}-\d{2}-\d{2}$/.test(to || '')) {
+function yearOverview(db, { from: windowFrom, to, includeUnfinished = false }) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(windowFrom || '') || !/^\d{4}-\d{2}-\d{2}$/.test(to || '')) {
     throw new PlanError(400, 'from and to must be YYYY-MM-DD');
   }
+  // includeUnfinished: no lower bound, so plans from earlier years count too;
+  // a badge with nothing inside [windowFrom, to] is then kept only while its
+  // planned sessions aren't all held (started last year, still to continue)
+  const from = includeUnfinished ? '0000-01-01' : windowFrom;
   const rows = db.prepare(`
     SELECT pl.level_group AS unit, pi.requirement_id, pi.role, e.start_at, e.end_at,
            r.group_id, r.badge_id
@@ -217,7 +221,14 @@ function yearOverview(db, { from, to }) {
     WHERE e.start_at >= ? AND e.start_at <= ?`).all(from, `${to}T￿`);
   const nowIso = new Date().toISOString();
   const units = new Map(); // unit → badgeId → groupId → reqId → state
+  // earliest planned meeting per unit + badge, any role — the website's
+  // "first planned date" sort on the program-year view
+  const firsts = new Map(); // `${unit}|${badgeId}` → start_at
+  const inWindow = new Set(); // unit|badge with an item inside [windowFrom, to]
   for (const row of rows) {
+    const fk = `${row.unit}|${row.badge_id}`;
+    if (!firsts.has(fk) || row.start_at < firsts.get(fk)) firsts.set(fk, row.start_at);
+    if (row.start_at >= windowFrom) inWindow.add(fk);
     const badges = units.get(row.unit) || units.set(row.unit, new Map()).get(row.unit);
     const groups = badges.get(row.badge_id) || badges.set(row.badge_id, new Map()).get(row.badge_id);
     const reqs = groups.get(row.group_id) || groups.set(row.group_id, new Map()).get(row.group_id);
@@ -244,13 +255,19 @@ function yearOverview(db, { from, to }) {
         planned += Math.min(pl, need);
         done += Math.min(dn, need);
       }
-      list.push({ badgeId, name: b.name, levelGroup: b.level_group, frontier: b.frontier, needed, planned, done, startedOnly });
+      const key = `${unit}|${badgeId}`;
+      const firstPlannedAt = firsts.get(key) || null;
+      if (includeUnfinished && !inWindow.has(key) && done >= needed) continue; // an earlier year's badge, held in full
+      list.push({
+        badgeId, name: b.name, levelGroup: b.level_group, frontier: b.frontier, needed, planned, done, startedOnly,
+        firstPlannedAt, carriedOver: !!firstPlannedAt && firstPlannedAt < windowFrom,
+      });
     }
     list.sort((a, b) => a.name.localeCompare(b.name));
-    out.push({ unit, badges: list });
+    if (list.length) out.push({ unit, badges: list });
   }
   out.sort((a, b) => PLAN_LEVEL_GROUPS.indexOf(a.unit) - PLAN_LEVEL_GROUPS.indexOf(b.unit));
-  return { from, to, units: out };
+  return { from: windowFrom, to, includeUnfinished: !!includeUnfinished, units: out };
 }
 
 

@@ -262,7 +262,11 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
 
   api.get('/progress/year', leader, (req, res) => {
     try {
-      return res.json(plans.yearOverview(db, { from: req.query.from, to: req.query.to }));
+      return res.json(plans.yearOverview(db, {
+        from: req.query.from,
+        to: req.query.to,
+        includeUnfinished: req.query.includeUnfinished === '1',
+      }));
     } catch (err) {
       if (err instanceof plans.PlanError) return res.status(err.status).json({ error: err.message });
       throw err;

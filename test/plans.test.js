@@ -200,7 +200,38 @@ test('year overview: plan-based bars — needed honors n_of, done = completing i
     { needed: b.needed, planned: b.planned, done: b.done, startedOnly: b.startedOnly },
     { needed: 3, planned: 3, done: 2, startedOnly: 0 },
   );
+  // firstPlannedAt = the earliest meeting in the window carrying any item of
+  // this badge for this unit (earlier tests may have planned it too)
+  const earliest = db.prepare(`
+    SELECT MIN(e.start_at) AS m FROM plan_items pi
+    JOIN plans pl ON pl.id = pi.plan_id JOIN events e ON e.id = pl.event_id
+    JOIN requirements r ON r.id = pi.requirement_id
+    WHERE pl.level_group = 'Pioneer/Patriot' AND r.badge_id = 'example-badge-pipa'
+      AND e.start_at >= ? AND e.start_at <= ?`).get(from, `${to}T￿`).m;
+  assert.equal(b.firstPlannedAt, earliest);
+  assert.ok(b.firstPlannedAt <= past, 'the held meeting (or an earlier one) comes first');
   assert.equal((await get('/api/v1/progress/year?from=bad&to=2027-01-01', t)).status, 400);
+});
+
+test('year overview includeUnfinished: an earlier badge not held in full carries into a later window', async () => {
+  const t = await token({ groups: [GROUP], preferred_username: 'leader@example.com' });
+  // a window with no meetings of its own, after every plan made so far
+  const from = new Date(Date.now() + 200 * 864e5).toISOString().slice(0, 10);
+  const to = new Date(Date.now() + 230 * 864e5).toISOString().slice(0, 10);
+  const plain = await (await get(`/api/v1/progress/year?from=${from}&to=${to}`, t)).json();
+  assert.ok(!plain.units.some((u) => u.badges.some((b) => b.badgeId === 'example-badge-pipa')), 'the default stays inside the window');
+  const all = await (await get(`/api/v1/progress/year?from=${from}&to=${to}&includeUnfinished=1`, t)).json();
+  assert.equal(all.from, from, 'the response still names the requested window');
+  assert.equal(all.includeUnfinished, true);
+  const unit = all.units.find((u) => u.unit === 'Pioneer/Patriot');
+  const b = unit && unit.badges.find((x) => x.badgeId === 'example-badge-pipa');
+  // the previous test left req 2's finish on a meeting still to come, so
+  // this badge's plan isn't held in full yet
+  assert.ok(b, 'the unfinished earlier badge is listed');
+  assert.ok(b.done < b.needed);
+  assert.equal(b.carriedOver, true);
+  assert.ok(b.firstPlannedAt < from);
+  assert.ok(all.units.every((u) => u.badges.length), 'units with nothing to show are left out');
 });
 
 test('year badge detail: sessions listed, gaps split required vs optional, met n_of hides remaining', async () => {
