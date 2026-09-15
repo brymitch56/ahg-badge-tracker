@@ -414,12 +414,13 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
     }
   });
   // A leader's call on a girl's extra stars at one level (lib/stars.js):
-  // 'separate' (legacy stars added on top) or 'hours' (count against her
-  // hours). Reconciles that girl at once, so a false proposal is withdrawn.
+  // 'separate' (legacy stars added on top) or 'fresh' (they stand; only hours
+  // from the current program year on count toward the next star). Reconciles
+  // that girl at once, so a false proposal is withdrawn.
   api.post('/admin/stars/legacy-mode', admin, (req, res) => {
     const { girlId, level, mode } = req.body || {};
     try {
-      return res.json(servicepull.setLegacyMode(db, Number(girlId), level, mode, req.user.email));
+      return res.json(servicepull.setLegacyMode(db, Number(girlId), level, mode, req.user.email, { tz: cfg.tz }));
     } catch (e) {
       if (e.status) return res.status(e.status).json({ error: e.message });
       throw e;

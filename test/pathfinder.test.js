@@ -1,9 +1,10 @@
 'use strict';
 // Service Stars: stars awarded on Pathfinder hours before the troop stopped
-// counting them (ruling Sept 2026), and a leader's call on other extra stars.
-// The awarded stars stand; the Pathfinder hours they needed stay counted as a
-// fixed credit, so every later counted hour goes toward the next star; no
-// other Pathfinder hours ever count. Invented names and ids only.
+// counting them (ruling Sept 2026), and a leader's fresh start for other
+// extra stars. Pathfinder: the awarded stars stand and the Pathfinder hours
+// they needed stay counted as a fixed credit. Fresh start: the stars on
+// record stand and only hours from the program year on count, nothing
+// carried in. Invented names and ids only.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { generateKeyPair, exportJWK, SignJWT, createLocalJWKSet } = require('jose');
@@ -67,25 +68,44 @@ test('counted hours dropping below the baseline still surface as a conflict', ()
   assert.deepEqual(l.conflict, { kind: 'more_on_record', onRecord: 3, expected: 2, unexplained: 1 });
 });
 
-test('a leader\'s "count against her hours" choice: extra stars are earned back before the next one', () => {
-  // 42.25 h Tenderheart → 8 stars, 2.25 carry; Explorer 1 on record at 8.75 h
-  const run = (explorerHours, legacyMode, onRecordEx = 1) => St.computeStarChain({
+test('a fresh start: the stars on record stand, only hours since the program year began count, nothing carries in', () => {
+  // 42.25 h Tenderheart → 8 stars, 2.25 carry; 1 Explorer star on record at 8.75 h;
+  // 1.5 of her 8 Explorer hours were logged this program year
+  const levels = (legacyMode, freshHours, { onRecordEx = 1, explorerHours = 800 } = {}) => St.computeStarChain({
     hoursByLevel: { Tenderheart: 4225, Explorer: explorerHours },
     onRecord: { Tenderheart: 8, Explorer: onRecordEx },
-    baseline: { Tenderheart: { onRecord: 8, earnable: 8, hours: 4225 }, Explorer: { onRecord: 1, earnable: 0, hours: 875, legacyMode } },
-  }).levels[1];
-  assert.equal(run(800, 'separate').expected, 2, 'default: the extra star is added on top');
-  let l = run(800, 'hours');
-  assert.deepEqual({ expected: l.expected, newStars: l.newStars, legacyMode: l.legacyMode, credit: l.credit, pfCredit: l.pathfinderCredit, unexplained: l.unexplainedExtras },
-    { expected: 1, newStars: 0, legacyMode: 'hours', credit: 0, pfCredit: 0, unexplained: 1 });
-  l = run(500, 'hours'); // fewer hours than the star she holds: covered, not a conflict
-  assert.deepEqual({ available: l.available, credit: l.credit, expected: l.expected, conflict: l.conflict }, { available: 1000, credit: 275, expected: 1, conflict: null });
-  assert.equal(run(1800, 'hours').expected, 2, 'the 2nd Explorer star once the hours earn it');
+    baseline: {
+      Tenderheart: { onRecord: 8, earnable: 8, hours: 4225 },
+      Explorer: { onRecord: 1, earnable: 0, hours: 875, legacyMode, freshFrom: '2026-09-01', freshHours },
+    },
+  }).levels;
+  assert.equal(levels('separate', 150)[1].expected, 2, 'default: the extra star is added on top of 10.25 h');
+
+  let [, ex, pi] = levels('fresh', 150);
+  assert.deepEqual(
+    { carryIn: ex.carryIn, available: ex.available, earnable: ex.earnable, expected: ex.expected, newStars: ex.newStars, carryOut: ex.carryOut, freshFrom: ex.freshFrom, freshHours: ex.freshHours, toNext: ex.toNext.hundredths, conflict: ex.conflict },
+    { carryIn: 0, available: 150, earnable: 0, expected: 1, newStars: 0, carryOut: 150, freshFrom: '2026-09-01', freshHours: 150, toNext: 850, conflict: null },
+  );
+  assert.equal(pi.carryIn, 150, 'hours earned this year still carry on up');
+  [, ex] = levels('fresh', 950);
+  assert.equal(ex.newStars, 0, '9.5 h this year: still 1');
+  [, ex] = levels('fresh', 1000);
+  assert.deepEqual({ expected: ex.expected, newStars: ex.newStars, carryOut: ex.carryOut }, { expected: 2, newStars: 1, carryOut: 0 }, 'her 2nd star at 10 hours this year');
+  [, ex] = levels('fresh', 150, { onRecordEx: 0 });
+  assert.equal(ex.conflict.kind, 'instance_removed', 'a star removed on AHGFamily is still surfaced');
+  [, ex] = levels('fresh', 150, { onRecordEx: 3 });
+  assert.deepEqual(ex.conflict, { kind: 'more_on_record', onRecord: 3, expected: 1, unexplained: 2 });
 });
 
 test('girls with no extra stars are untouched by Pathfinder hours', () => {
   const l = TH(1200, 900, { onRecord: 2, earnable: 2, hours: 1000 }, 2);
-  assert.deepEqual({ credit: l.credit, covered: l.coveredStars, expected: l.expected, carryOut: l.carryOut }, { credit: 0, covered: 0, expected: 2, carryOut: 200 });
+  assert.deepEqual({ credit: l.credit, covered: l.coveredStars, expected: l.expected, carryOut: l.carryOut, freshHours: l.freshHours }, { credit: 0, covered: 0, expected: 2, carryOut: 200, freshHours: null });
+});
+
+test('programYearStart: Sept 1 of the program year containing the day', () => {
+  assert.equal(servicepull.programYearStart('2026-09-01'), '2026-09-01');
+  assert.equal(servicepull.programYearStart('2026-12-31'), '2026-09-01');
+  assert.equal(servicepull.programYearStart('2027-08-31'), '2026-09-01');
 });
 
 // ------------------------------------------------- reconcile + admin API --
@@ -101,17 +121,19 @@ const call = async (method, p, t, body) => {
   return { status: r.status, json: await r.json().catch(() => null) };
 };
 const ts = () => new Date().toISOString();
+const todayUtc = () => new Date().toISOString().slice(0, 10);
+const PY_START = servicepull.programYearStart(todayUtc()); // the test server runs in UTC
 let rec = 0;
 const addGirl = (first, level, youthId) => Number(db.prepare(
   "INSERT INTO girls (first_name, last_name, ahg_level, ahg_youth_id, ahg_youth_id_source, active, updated_at) VALUES (?, 'Example', ?, ?, 'manual', 1, ?)",
 ).run(first, level, youthId, ts()).lastInsertRowid);
-const addHours = (girlId, level, hundredths) => db.prepare(
+const addHours = (girlId, level, hundredths, date = '2025-01-01') => db.prepare(
   'INSERT INTO service_hours (girl_id, ahg_record_id, date, level, hundredths, verified, description, fetched_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)',
-).run(girlId, `svctest${String(++rec).padStart(5, '0')}`, '2026-01-01', level, hundredths, 'Service Hour Meeting', ts());
+).run(girlId, `svctest${String(++rec).padStart(5, '0')}`, date, level, hundredths, 'Service Hour Meeting', ts());
 const addStars = (girlId, level, n) => {
   for (let i = 0; i < n; i++) {
     db.prepare('INSERT INTO award_instances (girl_id, ahg_award_id, ad_record_id, completed_on, first_seen_at, fetched_at) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(girlId, St.STAR_AWARD_IDS[level], `adtest${String(++rec).padStart(6, '0')}`, '2026-01-01', ts(), ts());
+      .run(girlId, St.STAR_AWARD_IDS[level], `adtest${String(++rec).padStart(6, '0')}`, '2025-01-01', ts(), ts());
   }
 };
 const addBaseline = (girlId, level, onRecord, earnable, hours) => db.prepare(
@@ -153,10 +175,12 @@ test.before(async () => {
   addStars(lo, 'Tenderheart', 3);
   addBaseline(lo, 'Tenderheart', 3, 2, 1100);
 
-  // Lu: an Explorer star on record before her hours earned it; a #2 pending
+  // Lu: an Explorer star awarded before this program year; 6.5 h before it,
+  // 1.5 h logged this year, 2.25 h carried from Tenderheart; a #2 pending
   lu = addGirl('Lu', 'Explorer', 'upftest00003');
   addHours(lu, 'Tenderheart', 4225);
-  addHours(lu, 'Explorer', 800);
+  addHours(lu, 'Explorer', 650);
+  addHours(lu, 'Explorer', 150, todayUtc());
   addStars(lu, 'Tenderheart', 8);
   addStars(lu, 'Explorer', 1);
   addBaseline(lu, 'Tenderheart', 8, 8, 4225);
@@ -187,13 +211,14 @@ test('stars view shows the Pathfinder credit and covered stars; other extra star
   assert.deepEqual({ credit: th(lo).pathfinderCredit, covered: th(lo).coveredStars, unexplained: th(lo).unexplainedExtras, earnable: th(lo).earnable, carryOut: th(lo).carryOut, newStars: th(lo).newStars },
     { credit: 4, covered: 1, unexplained: 0, earnable: 3, carryOut: 1.5, newStars: 0 });
   const ex = v.girls.find((g) => g.id === lu).levels.find((l) => l.level === 'Explorer');
-  assert.deepEqual({ unexplained: ex.unexplainedExtras, mode: ex.legacyMode, expected: ex.expected }, { unexplained: 1, mode: 'separate', expected: 2 });
+  assert.deepEqual({ unexplained: ex.unexplainedExtras, mode: ex.legacyMode, expected: ex.expected, freshFrom: ex.freshFrom, freshHours: ex.freshHours },
+    { unexplained: 1, mode: 'separate', expected: 2, freshFrom: null, freshHours: null });
 });
 
-test('admin sets "count against her hours": the false proposal is withdrawn at once, audited; bad input refused', async () => {
-  const body = { girlId: lu, level: 'Explorer', mode: 'hours' };
+test('admin sets a fresh start from the program year: the false proposal is withdrawn at once, audited; bad input refused', async () => {
+  const body = { girlId: lu, level: 'Explorer', mode: 'fresh' };
   assert.equal((await call('POST', '/api/v1/admin/stars/legacy-mode', leaderT, body)).status, 403);
-  assert.equal((await call('POST', '/api/v1/admin/stars/legacy-mode', adminT, { ...body, mode: 'nope' })).status, 400);
+  assert.equal((await call('POST', '/api/v1/admin/stars/legacy-mode', adminT, { ...body, mode: 'hours' })).status, 400, 'the retired choice is refused');
   assert.equal((await call('POST', '/api/v1/admin/stars/legacy-mode', adminT, { ...body, level: 'Pathfinder' })).status, 400);
   assert.equal((await call('POST', '/api/v1/admin/stars/legacy-mode', adminT, { ...body, level: 'Patriot' })).status, 404, 'no baseline at that level');
   assert.equal((await call('POST', '/api/v1/admin/stars/legacy-mode', adminT, { ...body, girlId: 99999 })).status, 404);
@@ -201,16 +226,27 @@ test('admin sets "count against her hours": the false proposal is withdrawn at o
 
   const r = await call('POST', '/api/v1/admin/stars/legacy-mode', adminT, body);
   assert.equal(r.status, 200);
-  assert.deepEqual(r.json, { girlId: lu, level: 'Explorer', mode: 'hours', withdrawn: 1, proposed: 0, conflicts: 0 });
+  assert.deepEqual(r.json, { girlId: lu, level: 'Explorer', mode: 'fresh', freshFrom: PY_START, withdrawn: 1, proposed: 0, conflicts: 0 });
   assert.equal(proposal(luProposal).status, 'withdrawn');
-  assert.equal(db.prepare("SELECT legacy_mode FROM star_baseline WHERE girl_id = ? AND level = 'Explorer'").get(lu).legacy_mode, 'hours');
+  assert.deepEqual({ ...db.prepare("SELECT legacy_mode, fresh_from FROM star_baseline WHERE girl_id = ? AND level = 'Explorer'").get(lu) }, { legacy_mode: 'fresh', fresh_from: PY_START });
   const audit = db.prepare("SELECT * FROM audit_log WHERE action = 'stars.legacy_mode'").get();
-  assert.deepEqual([JSON.parse(audit.before), JSON.parse(audit.after), audit.actor], [{ level: 'Explorer', mode: 'separate' }, { level: 'Explorer', mode: 'hours' }, 'admin@example.com']);
+  assert.deepEqual([JSON.parse(audit.before), JSON.parse(audit.after), audit.actor],
+    [{ level: 'Explorer', mode: 'separate', freshFrom: null }, { level: 'Explorer', mode: 'fresh', freshFrom: PY_START }, 'admin@example.com']);
+
+  const v = (await call('GET', '/api/v1/stars', leaderT)).json;
+  const ex = v.girls.find((g) => g.id === lu).levels.find((l) => l.level === 'Explorer');
+  assert.deepEqual({ mode: ex.legacyMode, freshFrom: ex.freshFrom, freshHours: ex.freshHours, carryIn: ex.carryIn, expected: ex.expected, carryOut: ex.carryOut, toNextHours: ex.toNextHours },
+    { mode: 'fresh', freshFrom: PY_START, freshHours: 1.5, carryIn: 0, expected: 1, carryOut: 1.5, toNextHours: 8.5 });
+
+  // choosing fresh again keeps the stored start date
+  const again = await call('POST', '/api/v1/admin/stars/legacy-mode', adminT, body);
+  assert.equal(again.json.freshFrom, PY_START);
 
   // flipping back means the leader wants the extra star added on top again:
   // a withdrawn proposal never blocks, so #2 is proposed afresh
   const back = await call('POST', '/api/v1/admin/stars/legacy-mode', adminT, { ...body, mode: 'separate' });
   assert.equal(back.status, 200);
+  assert.equal(back.json.freshFrom, null);
   assert.equal(back.json.proposed, 1);
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM star_proposals WHERE girl_id = ? AND level = 'Explorer' AND ordinal = 2 AND status = 'proposed'").get(lu).n, 1);
 });

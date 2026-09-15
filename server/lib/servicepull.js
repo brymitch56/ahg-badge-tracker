@@ -217,9 +217,14 @@ function onRecordForGirl(db, girlId) {
 }
 
 function baselineForGirl(db, girlId) {
-  const rows = db.prepare('SELECT level, on_record, earnable, hours_hundredths, legacy_mode FROM star_baseline WHERE girl_id = ?').all(girlId);
+  const rows = db.prepare('SELECT level, on_record, earnable, hours_hundredths, legacy_mode, fresh_from FROM star_baseline WHERE girl_id = ?').all(girlId);
   if (!rows.length) return null;
-  return Object.fromEntries(rows.map((r) => [r.level, { onRecord: r.on_record, earnable: r.earnable, hours: r.hours_hundredths, legacyMode: r.legacy_mode }]));
+  // a fresh start counts only approved hours at that level dated on/after fresh_from
+  const since = db.prepare('SELECT COALESCE(SUM(hundredths), 0) AS h FROM service_hours WHERE girl_id = ? AND level = ? AND verified = 1 AND hundredths IS NOT NULL AND date >= ?');
+  return Object.fromEntries(rows.map((r) => [r.level, {
+    onRecord: r.on_record, earnable: r.earnable, hours: r.hours_hundredths, legacyMode: r.legacy_mode, freshFrom: r.fresh_from,
+    freshHours: r.legacy_mode === 'fresh' && r.fresh_from ? since.get(girlId, r.level, r.fresh_from).h : null,
+  }]));
 }
 
 /** Compute a girl's chain from the mirror (no fetch). */
@@ -307,29 +312,41 @@ function rebaselineLevel(db, girlId, level, actor = 'system') {
     .run(girlId, level, l.onRecord, l.earnable, l.available, now(), actor);
 }
 
+/** Start of the program year (Sept 1) containing a YYYY-MM-DD day. */
+function programYearStart(isoDay) {
+  const [y, m] = String(isoDay).split('-').map(Number);
+  return `${m >= 9 ? y : y - 1}-09-01`;
+}
+
 /**
  * A leader's call on a girl's extra stars at one level (lib/stars.js):
  * 'separate' — legacy stars added on top of what her hours earn (default) —
- * or 'hours' — they count against her hours. Reconciles that level at once,
- * so a proposal the choice no longer supports is withdrawn straight away.
- * Audited. Throws an Error carrying .status (400/404).
+ * or 'fresh' — the stars on record stand, and from the start of the current
+ * program year only that year's hours count toward her next star, nothing
+ * carried in. The start date is stored, so it doesn't move when the next
+ * program year begins (re-choosing 'fresh' keeps it). Reconciles that level
+ * at once, so a proposal the choice no longer supports is withdrawn straight
+ * away. Audited. Throws an Error carrying .status (400/404).
  */
-function setLegacyMode(db, girlId, level, mode, actor = 'system') {
+function setLegacyMode(db, girlId, level, mode, actor = 'system', { tz = 'UTC', day = null } = {}) {
   const fail = (status, msg) => Object.assign(new Error(msg), { status });
-  if (!['separate', 'hours'].includes(mode)) throw fail(400, "mode must be 'separate' or 'hours'");
+  if (!['separate', 'fresh'].includes(mode)) throw fail(400, "mode must be 'separate' or 'fresh'");
   if (!STAR_LEVELS.includes(level)) throw fail(400, `level must be one of ${STAR_LEVELS.join(' | ')}`);
   const girl = db.prepare('SELECT * FROM girls WHERE id = ?').get(girlId);
   if (!girl) throw fail(404, 'girl not found');
-  const base = db.prepare('SELECT legacy_mode FROM star_baseline WHERE girl_id = ? AND level = ?').get(girlId, level);
+  const base = db.prepare('SELECT legacy_mode, fresh_from FROM star_baseline WHERE girl_id = ? AND level = ?').get(girlId, level);
   if (!base) throw fail(404, 'no star baseline for this girl and level yet — run a service-hours pull first');
+  const freshFrom = mode !== 'fresh' ? null
+    : (base.legacy_mode === 'fresh' && base.fresh_from ? base.fresh_from : programYearStart(day || today(tz)));
   const run = db.transaction(() => {
-    db.prepare('UPDATE star_baseline SET legacy_mode = ? WHERE girl_id = ? AND level = ?').run(mode, girlId, level);
+    db.prepare('UPDATE star_baseline SET legacy_mode = ?, fresh_from = ? WHERE girl_id = ? AND level = ?').run(mode, freshFrom, girlId, level);
     db.prepare('INSERT INTO audit_log (at, actor, action, entity, entity_id, before, after) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(now(), actor, 'stars.legacy_mode', 'girl', String(girlId), JSON.stringify({ level, mode: base.legacy_mode }), JSON.stringify({ level, mode }));
+      .run(now(), actor, 'stars.legacy_mode', 'girl', String(girlId),
+        JSON.stringify({ level, mode: base.legacy_mode, freshFrom: base.fresh_from }), JSON.stringify({ level, mode, freshFrom }));
     return reconcileGirl(db, girl, { fetchedLevels: [level], actor });
   });
   const r = run();
-  return { girlId, level, mode, withdrawn: r.withdrawn, proposed: r.proposed, conflicts: r.conflicts };
+  return { girlId, level, mode, freshFrom, withdrawn: r.withdrawn, proposed: r.proposed, conflicts: r.conflicts };
 }
 
 // ------------------------------------------------------------------ views --
@@ -376,6 +393,8 @@ function listStars(db, { girlId = null } = {}) {
           coveredStars: l.coveredStars,
           unexplainedExtras: l.unexplainedExtras,
           legacyMode: l.legacyMode,
+          freshFrom: l.freshFrom,
+          freshHours: l.freshHours == null ? null : l.freshHours / 100,
           pathfinderCredit: l.pathfinderCredit / 100,
           expected: l.expected,
           newStars: l.newStars,
@@ -456,5 +475,5 @@ function decideStarProposals(db, decisions, actor, { tz = 'UTC' } = {}) {
 }
 
 module.exports = {
-  pullServiceState, reconcileGirl, chainForGirl, rebaselineLevel, setLegacyMode, listStars, listStarProposals, decideStarProposals, starLevelsFor,
+  pullServiceState, reconcileGirl, chainForGirl, rebaselineLevel, setLegacyMode, programYearStart, listStars, listStarProposals, decideStarProposals, starLevelsFor,
 };
