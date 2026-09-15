@@ -413,6 +413,18 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
       throw e;
     }
   });
+  // A leader's call on a girl's extra stars at one level (lib/stars.js):
+  // 'separate' (legacy stars added on top) or 'hours' (count against her
+  // hours). Reconciles that girl at once, so a false proposal is withdrawn.
+  api.post('/admin/stars/legacy-mode', admin, (req, res) => {
+    const { girlId, level, mode } = req.body || {};
+    try {
+      return res.json(servicepull.setLegacyMode(db, Number(girlId), level, mode, req.user.email));
+    } catch (e) {
+      if (e.status) return res.status(e.status).json({ error: e.message });
+      throw e;
+    }
+  });
   api.get('/conflicts', leader, (req, res) => res.json(ahgpull.listConflicts(db, { all: req.query.all === '1' })));
   api.post('/conflicts/:id/resolve', leader, (req, res) => {
     try {

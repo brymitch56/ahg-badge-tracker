@@ -217,17 +217,17 @@ function onRecordForGirl(db, girlId) {
 }
 
 function baselineForGirl(db, girlId) {
-  const rows = db.prepare('SELECT level, on_record, earnable FROM star_baseline WHERE girl_id = ?').all(girlId);
+  const rows = db.prepare('SELECT level, on_record, earnable, hours_hundredths, legacy_mode FROM star_baseline WHERE girl_id = ?').all(girlId);
   if (!rows.length) return null;
-  return Object.fromEntries(rows.map((r) => [r.level, { onRecord: r.on_record, earnable: r.earnable }]));
+  return Object.fromEntries(rows.map((r) => [r.level, { onRecord: r.on_record, earnable: r.earnable, hours: r.hours_hundredths, legacyMode: r.legacy_mode }]));
 }
 
 /** Compute a girl's chain from the mirror (no fetch). */
 function chainForGirl(db, girlId) {
-  const { hours } = hoursForGirl(db, girlId);
+  const { hours, pathfinder } = hoursForGirl(db, girlId);
   const onRecord = onRecordForGirl(db, girlId);
   const baseline = baselineForGirl(db, girlId);
-  return { chain: stars.computeStarChain({ hoursByLevel: hours, onRecord, baseline }), hours, onRecord, baseline };
+  return { chain: stars.computeStarChain({ hoursByLevel: hours, onRecord, baseline, pathfinderHundredths: pathfinder }), hours, onRecord, baseline };
 }
 
 /**
@@ -238,7 +238,7 @@ function chainForGirl(db, girlId) {
  */
 function reconcileGirl(db, girl, { fetchedLevels = STAR_LEVELS, eligibility = [], actor = 'system', ts = now() } = {}) {
   const out = { baselines: 0, proposed: 0, withdrawn: 0, recorded: 0, conflicts: 0, crossCheck: [] };
-  const { hours } = hoursForGirl(db, girl.id);
+  const { hours, pathfinder } = hoursForGirl(db, girl.id);
   const onRecord = onRecordForGirl(db, girl.id);
   let baseline = baselineForGirl(db, girl.id) || {};
   // first sight of a level: snapshot before judging it
@@ -247,10 +247,10 @@ function reconcileGirl(db, girl, { fetchedLevels = STAR_LEVELS, eligibility = []
     if (!fetchedLevels.includes(l.level) || baseline[l.level]) continue;
     db.prepare(`INSERT INTO star_baseline (girl_id, level, on_record, earnable, hours_hundredths, captured_at, captured_by) VALUES (?, ?, ?, ?, ?, ?, ?)`)
       .run(girl.id, l.level, l.onRecord, l.earnable, l.available, ts, actor);
-    baseline = { ...baseline, [l.level]: { onRecord: l.onRecord, earnable: l.earnable } };
+    baseline = { ...baseline, [l.level]: { onRecord: l.onRecord, earnable: l.earnable, hours: l.available, legacyMode: 'separate' } };
     out.baselines += 1;
   }
-  const chain = stars.computeStarChain({ hoursByLevel: hours, onRecord, baseline });
+  const chain = stars.computeStarChain({ hoursByLevel: hours, onRecord, baseline, pathfinderHundredths: pathfinder });
   for (const l of chain.levels) {
     if (!fetchedLevels.includes(l.level)) continue;
     // -- proposals: ordinals onRecord+1 .. expected ------------------------
@@ -307,6 +307,31 @@ function rebaselineLevel(db, girlId, level, actor = 'system') {
     .run(girlId, level, l.onRecord, l.earnable, l.available, now(), actor);
 }
 
+/**
+ * A leader's call on a girl's extra stars at one level (lib/stars.js):
+ * 'separate' — legacy stars added on top of what her hours earn (default) —
+ * or 'hours' — they count against her hours. Reconciles that level at once,
+ * so a proposal the choice no longer supports is withdrawn straight away.
+ * Audited. Throws an Error carrying .status (400/404).
+ */
+function setLegacyMode(db, girlId, level, mode, actor = 'system') {
+  const fail = (status, msg) => Object.assign(new Error(msg), { status });
+  if (!['separate', 'hours'].includes(mode)) throw fail(400, "mode must be 'separate' or 'hours'");
+  if (!STAR_LEVELS.includes(level)) throw fail(400, `level must be one of ${STAR_LEVELS.join(' | ')}`);
+  const girl = db.prepare('SELECT * FROM girls WHERE id = ?').get(girlId);
+  if (!girl) throw fail(404, 'girl not found');
+  const base = db.prepare('SELECT legacy_mode FROM star_baseline WHERE girl_id = ? AND level = ?').get(girlId, level);
+  if (!base) throw fail(404, 'no star baseline for this girl and level yet — run a service-hours pull first');
+  const run = db.transaction(() => {
+    db.prepare('UPDATE star_baseline SET legacy_mode = ? WHERE girl_id = ? AND level = ?').run(mode, girlId, level);
+    db.prepare('INSERT INTO audit_log (at, actor, action, entity, entity_id, before, after) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(now(), actor, 'stars.legacy_mode', 'girl', String(girlId), JSON.stringify({ level, mode: base.legacy_mode }), JSON.stringify({ level, mode }));
+    return reconcileGirl(db, girl, { fetchedLevels: [level], actor });
+  });
+  const r = run();
+  return { girlId, level, mode, withdrawn: r.withdrawn, proposed: r.proposed, conflicts: r.conflicts };
+}
+
 // ------------------------------------------------------------------ views --
 /** Stars view for the Progress page: every active girl, every level. */
 function listStars(db, { girlId = null } = {}) {
@@ -347,6 +372,11 @@ function listStars(db, { girlId = null } = {}) {
           carryOut: l.carryOut / 100,
           onRecord: l.onRecord,
           legacy: l.legacy,
+          extraStars: l.extraStars,
+          coveredStars: l.coveredStars,
+          unexplainedExtras: l.unexplainedExtras,
+          legacyMode: l.legacyMode,
+          pathfinderCredit: l.pathfinderCredit / 100,
           expected: l.expected,
           newStars: l.newStars,
           proposedPending: (pending.find((p) => p.level === l.level) || { n: 0 }).n,
@@ -426,5 +456,5 @@ function decideStarProposals(db, decisions, actor, { tz = 'UTC' } = {}) {
 }
 
 module.exports = {
-  pullServiceState, reconcileGirl, chainForGirl, rebaselineLevel, listStars, listStarProposals, decideStarProposals, starLevelsFor,
+  pullServiceState, reconcileGirl, chainForGirl, rebaselineLevel, setLegacyMode, listStars, listStarProposals, decideStarProposals, starLevelsFor,
 };
