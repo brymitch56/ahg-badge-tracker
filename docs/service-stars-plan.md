@@ -37,6 +37,32 @@ carry_out_L = available_L − earnable_L × rate_L
 new_stars_L = earnable_L − stars_on_record_L          # <0 ⇒ conflict, not revert
 ```
 
+### Extra stars on record (troop rulings, Sept 2026)
+
+A level can hold MORE stars than its hours explain at first sync. The
+per-girl, per-level baseline records that, and `lib/stars.js` splits the
+extras three ways — never a silent revert:
+
+- **Pathfinder-explained** (Tenderheart only, automatic): some girls were
+  awarded stars on Pathfinder hours before the troop excluded them. Those
+  stars stand, and the Pathfinder hours they needed **stay counted** as a
+  fixed credit — exactly what the covered stars needed at baseline, never
+  more than the girl's Pathfinder total. Every counted hour after that goes
+  toward her next star; no other Pathfinder hours ever count, and none
+  carries into the next level.
+- **Fresh start** (`legacy_mode = 'fresh'` + `fresh_from`, a leader's call
+  per girl and level, admin-only `POST /admin/stars/legacy-mode`): for a
+  star awarded early, before a program year. The stars on record stand and
+  the level starts over at `fresh_from` (Sept 1 of the program year when it
+  was chosen, stored so it does not move): only that level's approved hours
+  dated on or after it count, nothing carries in, leftovers still carry on up.
+- **Legacy** (`'separate'`, the default): paper-era stars the ledger never
+  held, added on top of what the hours earn.
+
+Neither credit exceeds the covered stars' worth, so counted hours that drop
+below the baseline still raise a conflict. Changing the choice reconciles
+that level at once, withdrawing a proposal the new rule no longer supports.
+
 **Hours are fractional** (0.25, 0.33, 1.75… all observed live). Accumulate as
 **integer hundredths**; divide only at the end. A real girl sits at 14.95
 carry toward a 15-hour star — float summing already mis-totals this exact

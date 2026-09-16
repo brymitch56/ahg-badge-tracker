@@ -1,5 +1,19 @@
 # Handoff — where the build stands (Sept 8, 2026, evening)
 
+> **Update — Sept 16, 2026 (`56fd593`, 135 tests).** Since this was written:
+> the AHGFamily push shipped (Service Stars + requirement marks with notes,
+> both behind admin flags), the planner picker shows per-requirement planning
+> history, Review gained per-meeting attendance with leader verification, and
+> the website leaders pages gained **search on every list plus remembered
+> sorts** (Progress program year can be arranged by hand: "My order"), an
+> opt-in "include unfinished badges from earlier years", **duplicate/old girl
+> record repair** from Admin (`server/lib/girlmerge.js`, migration 008), and
+> two service-star rulings — a **fixed Pathfinder credit** and a per-level
+> **fresh start** (migrations 009/010, `POST /admin/stars/legacy-mode`); see
+> `docs/service-stars-plan.md` → "Extra stars on record". Mail for the push
+> report is still unset on the Pi, and the AHGFamily comment-length limit is
+> still unmeasured.
+
 Read `CLAUDE.md` first (public repo, PII rules, read-only AHGFamily rule,
 copyright rule). Then this file, then `docs/tracker-service-spec.md`
 (draft 3) and `docs/service-stars-plan.md` (draft 2, next feature).
