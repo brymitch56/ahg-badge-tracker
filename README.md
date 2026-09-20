@@ -1,13 +1,22 @@
 # ahg-badge-tracker
 
 Leaders-only badge requirement tracker for an American Heritage Girls troop.
-**Phase 1 (this repo today): read-only tooling that pulls the award and
-requirement structure out of AHGFamily.org into versioned JSON.** The tracker
-service and website pages come later and read from that catalog.
+Two parts live here:
 
-Read `CLAUDE.md` first: this repo is public, and the fetch scripts are
-read-only by design and by code (`lib/ahgfamily.js` refuses any endpoint that
-changes data).
+- **Catalog tooling** (`scripts/`, `lib/`) — pulls the award and requirement
+  structure out of AHGFamily.org into versioned JSON and merges it with
+  handbook annotations into the badge files everything else reads.
+- **The tracker service** (`server/`) — plans badge work per event, proposes
+  completions from check-in attendance for leaders to review, tracks progress
+  and service stars, and can (behind admin switches, off by default) write
+  confirmed results back to AHGFamily. A separate leaders' website is its
+  front end.
+
+Read `CLAUDE.md` first: this repo is public. AHGFamily access is read-only by
+design and by code — `lib/ahgfamily.js` refuses any endpoint that changes
+data — with **one** audited exception, the write-back in
+`server/lib/servicepush.js`, described in `CLAUDE.md`. The catalog and fetch
+scripts never write.
 
 ## Setup
 
@@ -17,7 +26,10 @@ chmod 600 .env
 npm test               # offline parser tests against synthetic fixtures
 ```
 
-Node 20+, no dependencies.
+Node 22 recommended (20 is the declared minimum — see the note on
+`better-sqlite3` below). The catalog scripts use only Node's standard
+library; the tracker service has four runtime dependencies (`express`,
+`better-sqlite3`, `jose`, `nodemailer`), so run `npm ci` before `npm test`.
 
 ## Scripts
 
@@ -51,13 +63,19 @@ invented example: [`handbook/README.md`](handbook/README.md).
 
 ## Tracker service (`server/`)
 
-Node/Express + SQLite (`better-sqlite3`, pinned to a release that ships
-prebuilt binaries for Node 20/22 on Windows x64 and Linux arm64 — bumping it
-means checking a prebuilt exists for every platform first, or `npm install`
-falls back to a from-source build needing Python + a C++ toolchain), runs under
-systemd on the Pi beside the check-in app
-(`deploy/ahg-badge-tracker.service`). Spec: `docs/tracker-service-spec.md`;
-Entra setup: `docs/entra-setup.md`.
+Node/Express + SQLite (`better-sqlite3`), run under systemd on the Pi beside
+the check-in app (`deploy/install-pi.sh`,
+`deploy/ahg-badge-tracker.service.template`). Spec:
+`docs/tracker-service-spec.md`; Pi setup: `docs/pi-setup.md`; Entra setup:
+`docs/entra-setup.md`; tunnel: `docs/tunnel-setup.md`.
+
+**`better-sqlite3` is a native module — check prebuilt binaries before
+bumping it.** The locked release (12.11.1) ships prebuilts for **Node 22** on
+Windows x64 and Linux arm64, but none for Node 20 on arm64; without a
+prebuilt, `npm install` falls back to a from-source build needing Python and
+a C++ toolchain. 13.x is not usable yet: it bundles its binaries and sets
+`"gypfile": false`, but the npm bundled with Node 22 (10.x) ignores that
+under `npm ci` and tries to compile anyway.
 
 ```sh
 cp .env.example .env            # fill the "Tracker service" block
@@ -69,14 +87,30 @@ npm start                       # http://127.0.0.1:3100
 curl -s http://127.0.0.1:3100/health
 ```
 
-Built so far (build order steps 1–2): `/health`; MSAL bearer validation
-(tenant JWKS, issuer, audience = tracker app id, `scp`, leader group or
-e-mail allow-list; admins from `ADMIN_EMAILS`); `GET /api/v1/me`;
-`GET /api/v1/badges[?levelGroup=]`, `GET /api/v1/badges/:id`;
-`POST /api/v1/admin/catalog/import`, `GET /api/v1/admin/catalog`,
-`GET /api/v1/admin/audit`. Every request needs `Authorization: Bearer
-<token for api://<tracker-client-id>/access_as_leader>` except `/health`.
-`AUTH_DISABLED=true` (never in production) fakes an admin for local
+What the service does today (current state, decisions and what is still
+open are in `docs/HANDOFF.md`):
+
+- **Auth** — MSAL bearer validation (tenant JWKS cached and warmed at boot,
+  issuer, audience = tracker app id, `scp`); leaders and admins are managed
+  from the website, with `ADMIN_EMAILS` in `.env` as the recovery list.
+- **Catalog** — versioned import of `data/badges` and the `/badges` reads.
+- **Check-in mirror** — girls, events and attendance from the check-in app's
+  Integration API, plus a signed webhook; leader-confirmed mapping of each
+  girl to her AHGFamily record.
+- **Plans** — per-event, per-unit plans with multi-session requirements, a
+  program-year overview, and per-requirement planning history.
+- **Proposals and review** — completions proposed from attendance, a review
+  queue with bulk decisions, manual (at-home) completions, progress views.
+- **AHGFamily pull** — weekly, read-only; reconciliation and conflict reports.
+- **Service stars** — profile pull, star maths, proposals
+  (`docs/service-stars-plan.md`).
+- **Write-back** — the one audited writer, off by default; see `CLAUDE.md`.
+- **Operations** — migrations on start, nightly backup job, optional e-mailed
+  run report, `/health`.
+
+Every request needs `Authorization: Bearer <token for
+api://<tracker-client-id>/access_as_leader>` except `/health` (`/` is 404 by
+design). `AUTH_DISABLED=true` (never in production) fakes an admin for local
 development.
 
 ## Checking AHGFamily for changes (periodic)
