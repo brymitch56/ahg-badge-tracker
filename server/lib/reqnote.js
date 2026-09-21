@@ -43,7 +43,13 @@ function requirementNote(db, completion, { tz = 'UTC' } = {}) {
   const v = c.verification ? (typeof c.verification === 'string' ? JSON.parse(c.verification) : c.verification) : null;
   if (v && v.missed && v.missed.length) {
     const who = clean(v.verifiedBy || c.decided_by || 'leader');
-    const when = mdy((v.verifiedAt || c.decided_at || '').slice(0, 10));
+    // verifiedAt/decided_at are UTC instants. The DAY a leader signed off is a
+    // local fact: slicing the UTC string stamped TOMORROW's date on anything
+    // confirmed after 8 pm Eastern — in a note that is written to AHGFamily.
+    // Same conversion the meeting dates above already use. A bare YYYY-MM-DD
+    // (no time) is already a local day and passes through untouched.
+    const stamp = v.verifiedAt || c.decided_at || '';
+    const when = mdy(/T\d/.test(stamp) ? localDate(stamp, tz) : stamp.slice(0, 10));
     parts.push(`Leader verified full completion (missed planned session${v.missed.length === 1 ? '' : 's'} ${v.missed.map(mdy).join(', ')})${v.note ? `: ${clean(v.note)}` : ''} — ${who}, ${when}`);
   }
   if (!parts.length) return '';

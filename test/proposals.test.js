@@ -10,6 +10,26 @@ const path = require('path');
 const { generateKeyPair, exportJWK, SignJWT, createLocalJWKSet } = require('jose');
 const { makeConfig } = require('../server/config');
 const { openDb, migrate } = require('../server/db');
+
+test('requirementNote: the sign-off date is the local day, not the UTC one', () => {
+  // 9:30 pm Eastern on Sept 20 is already Sept 21 in UTC. The note is written
+  // to AHGFamily, so "verified 09/21" for something signed off on the 20th is
+  // wrong — and it was, for anything confirmed after 8 pm. (It also made the
+  // requirement-push test fail every evening between 8 pm and midnight.)
+  const { requirementNote } = require('../server/lib/reqnote');
+  const completion = {
+    id: 1, girl_id: 1, requirement_id: 'example:1', source: 'manual', completed_on: '2026-09-08', notes: null, plan_item_id: null,
+    verification: { missed: ['2026-09-01'], verifiedBy: 'leader@example.com', verifiedAt: '2026-09-21T01:30:00.000Z', note: 'Finished at home' },
+  };
+  const dateOf = (tz) => requirementNote(null, completion, { tz }).split(', ').pop();
+  assert.equal(dateOf('America/New_York'), '09/20/2026', 'an evening sign-off keeps its own date');
+  assert.equal(dateOf('UTC'), '09/21/2026');
+  assert.equal(dateOf('Pacific/Auckland'), '09/21/2026');
+  completion.verification.verifiedAt = '2026-09-20T18:00:00.000Z'; // mid-afternoon Eastern
+  assert.equal(dateOf('America/New_York'), '09/20/2026');
+  completion.verification.verifiedAt = '2026-09-20'; // a bare date is already a local day
+  assert.equal(dateOf('America/New_York'), '09/20/2026', 'and must not be shifted');
+});
 const { createApp } = require('../server/app');
 const catalog = require('../server/lib/catalog');
 const plans = require('../server/lib/plans');
