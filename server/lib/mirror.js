@@ -37,11 +37,22 @@ async function recordRun(db, kind, fn) {
 
 // ------------------------------------------------------------------ events --
 /**
- * Upsert one Integration-API event row. Identity is ical_uid + start_at
- * (the same UNIQUE both apps use); manual events (ical_uid null) fall back
- * to checkin_event_id. A rescheduled feed event is a NEW identity on both
- * sides, so matching by checkin_event_id first is safe and keeps the mirror
- * aligned when the check-in app is reinstalled (ids change, identities don't).
+ * Upsert one Integration-API event row.
+ *
+ * Match on checkin_event_id FIRST. It is the check-in app's row id, and that
+ * app keeps it stable for the life of an event — including when the event is
+ * edited or rescheduled in the member portal. That matters because the
+ * portal's calendar UID is NOT stable: it is <head>-<event id>-<tail>, and the
+ * tail changes on every edit, even one that alters nothing visible. Matching on
+ * the id is what lets an edited event stay the same event here, with its plans
+ * and proposals still attached; the row's ical_uid and start_at are then
+ * refreshed from the response below.
+ *
+ * ical_uid + start_at is only the FALLBACK, for a row whose id we have never
+ * seen — chiefly after the check-in app is reinstalled, when ids change but an
+ * unedited event's uid and start do not. (It is unique in both apps' schemas,
+ * but unique is not the same as stable.) Manual events have no ical_uid and
+ * rely on the id alone.
  */
 function upsertEvent(db, ev) {
   const ts = now();
