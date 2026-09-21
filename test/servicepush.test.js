@@ -338,7 +338,8 @@ test('requirement push: checks the box, writes her date and the note, echoes eve
   const body = new Map(req.bodies[0]);
   assert.equal(body.get('checkbox-r00000test01'), '1');
   assert.equal(body.get('date-r00000test01'), '09/08/2026');
-  const today = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+  // the day the leader signed off, in the TROOP's zone (rcfg.tz) — not this machine's, and not UTC
+  const today = new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York', month: '2-digit', day: '2-digit', year: 'numeric' });
   assert.equal(body.get('comment-r00000test01'), `tracker: 09/08/2026 Meeting Two — Presented it | Leader verified full completion (missed planned session 09/01/2026): Finished the first half at home — leader@example.com, ${today}`);
   assert.equal(body.get('checkbox-r00000test02'), '1', 'the hand-entered item is echoed checked');
   assert.equal(body.get('comment-r00000test02'), 'hand-entered');
