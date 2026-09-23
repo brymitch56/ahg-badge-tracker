@@ -347,22 +347,79 @@ function badgeStatusFor(db, girlId, badgeId) {
   return { status: complete ? 'complete' : confirmed.size ? 'in_progress' : 'not_started', confirmedCount: confirmed.size };
 }
 
+/**
+ * A requirement she has begun but not finished: she attended at least one
+ * start/continue meeting for it (a participation row). Counts run over the
+ * chain of planned meetings she is part of — the unit's start/continue
+ * meetings up to and including the finish (or session) meeting that closes
+ * them — so an earlier or later re-plan of the same requirement doesn't
+ * count against her. Callers skip requirements with a live completion.
+ */
+function startedFor(db, girlId, requirementId, { tz = 'UTC', now: nowIso = now() } = {}) {
+  const last = db.prepare(`SELECT p.level_group, e.id AS event_id FROM participation pa
+    JOIN plan_items pi ON pi.id = pa.plan_item_id JOIN plans p ON p.id = pi.plan_id JOIN events e ON e.id = pa.event_id
+    WHERE pa.girl_id = ? AND pi.requirement_id = ? ORDER BY e.start_at DESC LIMIT 1`).get(girlId, requirementId);
+  if (!last) return null;
+  const rows = db.prepare(`
+    SELECT pi.role, e.id AS event_id, e.start_at,
+           (SELECT 1 FROM attendance a WHERE a.event_id = e.id AND a.girl_id = ? AND a.open = 0) AS attended
+    FROM plan_items pi JOIN plans p ON p.id = pi.plan_id JOIN events e ON e.id = p.event_id
+    WHERE pi.requirement_id = ? AND p.level_group = ? ORDER BY e.start_at, e.id`).all(girlId, requirementId, last.level_group);
+  const runs = [[]];
+  for (const r of rows) {
+    runs[runs.length - 1].push(r);
+    if (r.role === 'session' || r.role === 'finish') runs.push([]);
+  }
+  const run = runs.find((ru) => ru.some((r) => r.event_id === last.event_id)) || [];
+  const attended = run.filter((r) => r.attended);
+  if (!attended.length) return null;
+  const next = run.find((r) => !r.attended && r.start_at > nowIso);
+  return {
+    attended: attended.length,
+    planned: run.length,
+    startedOn: localDate(attended[0].start_at, tz),
+    nextOn: next ? localDate(next.start_at, tz) : null,
+  };
+}
+
+/** requirement id → startedFor(), for her requirements (optionally one badge's) with participation and no live completion. */
+function startedMap(db, girlId, { badgeId = null, ...opts } = {}) {
+  const out = new Map();
+  const ids = db.prepare(`SELECT DISTINCT pi.requirement_id AS id FROM participation pa
+    JOIN plan_items pi ON pi.id = pa.plan_item_id JOIN requirements r ON r.id = pi.requirement_id
+    WHERE pa.girl_id = ? ${badgeId ? 'AND r.badge_id = ?' : ''}
+      AND NOT EXISTS (SELECT 1 FROM completions c WHERE c.girl_id = pa.girl_id AND c.requirement_id = pi.requirement_id AND c.status <> 'rejected')`)
+    .all(...(badgeId ? [girlId, badgeId] : [girlId])).map((x) => x.id);
+  for (const id of ids) {
+    const s = startedFor(db, girlId, id, opts);
+    if (s) out.set(id, s);
+  }
+  return out;
+}
+
+// A badge with only started requirements is under way, not "not started".
+const withStarted = (st, started) => ({ ...st, startedCount: started.size, status: st.status === 'not_started' && started.size ? 'in_progress' : st.status });
+
 const stateRows = (db, girlId, badgeId) => db.prepare(`SELECT c.id, c.requirement_id, c.status, c.completed_on, c.source, c.needs_review, c.notes
   FROM completions c JOIN requirements r ON r.id = c.requirement_id
   WHERE c.girl_id = ? AND r.badge_id = ? AND c.status <> 'rejected'`).all(girlId, badgeId);
 
 /** Per girl: every active badge (optionally one level group) with status and per-requirement state. */
-function girlProgress(db, girl, { levelGroup = null } = {}) {
+function girlProgress(db, girl, { levelGroup = null, tz = 'UTC', now: nowIso = now() } = {}) {
   const badges = db.prepare(`SELECT * FROM badges WHERE active = 1 ${levelGroup ? 'AND level_group = ?' : ''} ORDER BY name`)
     .all(...(levelGroup ? [levelGroup] : []));
+  const startedAll = startedMap(db, girl.id, { tz, now: nowIso });
   return badges.map((b) => {
     const states = new Map(stateRows(db, girl.id, b.id).map((c) => [c.requirement_id, c]));
+    const started = new Map();
     const groups = db.prepare('SELECT * FROM badge_groups WHERE badge_id = ? ORDER BY position').all(b.id).map((gr) => ({
       label: gr.label,
       ruleType: gr.rule_type,
       ruleN: gr.rule_n,
       requirements: db.prepare('SELECT * FROM requirements WHERE group_id = ? AND active = 1 ORDER BY number, letter').all(gr.id).map((r) => {
         const c = states.get(r.id);
+        const s = c ? null : startedAll.get(r.id) || null;
+        if (s) started.set(r.id, s);
         return {
           requirementId: r.id,
           number: r.number,
@@ -375,6 +432,7 @@ function girlProgress(db, girl, { levelGroup = null } = {}) {
           notes: c ? c.notes : null,
           pushed: c ? !!db.prepare("SELECT 1 FROM push_queue WHERE completion_id = ? AND status = 'sent'").get(c.id) : false,
           needsReview: c ? !!c.needs_review : false,
+          started: s, // { attended, planned, startedOn, nextOn } while under way; state stays 'none'
         };
       }),
     }));
@@ -383,12 +441,16 @@ function girlProgress(db, girl, { levelGroup = null } = {}) {
     // further requirement recording for it happens directly in AHGFamily.
     const levels = b.level_group === 'All' ? null : PLAN_GIRL_LEVELS[b.level_group];
     const eligible = !girl.ahg_level || !levels ? true : levels.includes(girl.ahg_level);
-    return { badgeId: b.id, name: b.name, levelGroup: b.level_group, eligible, ...badgeStatusFor(db, girl.id, b.id), groups };
+    return { badgeId: b.id, name: b.name, levelGroup: b.level_group, eligible, ...withStarted(badgeStatusFor(db, girl.id, b.id), started), groups };
   });
 }
 
-/** Per badge: every active girl's status and per-requirement state ("who is missing what"). */
-function badgeProgress(db, badge) {
+/**
+ * Per badge: every active girl's status and per-requirement state ("who is
+ * missing what"). Requirements she has begun but not finished are in
+ * `started` (kept apart from `states`, which holds completion rows only).
+ */
+function badgeProgress(db, badge, { tz = 'UTC', now: nowIso = now() } = {}) {
   const requirements = db.prepare('SELECT * FROM requirements WHERE badge_id = ? AND active = 1 ORDER BY number, letter').all(badge.id)
     .map((r) => ({ requirementId: r.id, number: r.number, letter: r.letter, title: r.title }));
   const girls = db.prepare('SELECT * FROM girls WHERE active = 1 ORDER BY last_name, first_name').all().map((g) => {
@@ -396,7 +458,11 @@ function badgeProgress(db, badge) {
     for (const c of stateRows(db, g.id, badge.id)) {
       states[c.requirement_id] = { state: c.status, completedOn: c.completed_on, source: c.source, needsReview: !!c.needs_review };
     }
-    return { girlId: g.id, firstName: g.first_name, lastName: g.last_name, nickname: g.nickname, ahgLevel: g.ahg_level, ...badgeStatusFor(db, g.id, badge.id), states };
+    const started = startedMap(db, g.id, { badgeId: badge.id, tz, now: nowIso });
+    return {
+      girlId: g.id, firstName: g.first_name, lastName: g.last_name, nickname: g.nickname, ahgLevel: g.ahg_level,
+      ...withStarted(badgeStatusFor(db, g.id, badge.id), started), states, started: Object.fromEntries(started),
+    };
   });
   return { badgeId: badge.id, name: badge.name, levelGroup: badge.level_group, requirements, girls };
 }
@@ -404,7 +470,7 @@ function badgeProgress(db, badge) {
 module.exports = {
   PLAN_GIRL_LEVELS, CompletionError, localDate,
   proposeForEvent, eventProposals, decide, manualCompletion, deleteCompletion,
-  badgeStatusFor, girlProgress, badgeProgress,
+  badgeStatusFor, girlProgress, badgeProgress, startedFor,
 };
 
 // Review queue (cross-event catch-up) — see pendingProposals above.

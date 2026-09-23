@@ -285,12 +285,12 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
     const g = db.prepare('SELECT * FROM girls WHERE id = ?').get(req.params.id);
     if (!g) return res.status(404).json({ error: 'not found' });
     const levelGroup = typeof req.query.levelGroup === 'string' ? req.query.levelGroup : null;
-    return res.json({ girl: girlOut(g), badges: proposals.girlProgress(db, g, { levelGroup }) });
+    return res.json({ girl: girlOut(g), badges: proposals.girlProgress(db, g, { levelGroup, tz: cfg.tz }) });
   });
   api.get('/badges/:id/progress', leader, (req, res) => {
     const b = db.prepare('SELECT * FROM badges WHERE id = ?').get(req.params.id);
     if (!b) return res.status(404).json({ error: 'not found' });
-    return res.json(proposals.badgeProgress(db, b));
+    return res.json(proposals.badgeProgress(db, b, { tz: cfg.tz }));
   });
 
   // ------------------------------------------------------------------ sync --

@@ -419,3 +419,53 @@ test('deleteCompletion: a pushed completion is refused unless the leader states 
     assert.deepEqual({ id: r3.completionId, notes: r3.notes, pushed: r3.pushed, source: r3.source }, { id: c3.id, notes: 'photo', pushed: false, source: 'manual' });
   } finally { srv.close(); sdb.close(); }
 });
+
+test('started: attended start/continue meetings show as a started requirement with attended/planned counts', () => {
+  const sdb = openDb(':memory:');
+  migrate(sdb);
+  catalog.importFromDir(sdb, badgesDir, { actor: 'admin@example.com' });
+  const iso = () => new Date().toISOString();
+  const girl = (first, level) => Number(sdb.prepare('INSERT INTO girls (first_name, last_name, level, ahg_level, active, updated_at) VALUES (?, ?, ?, ?, 1, ?)').run(first, 'Test', level, level, iso()).lastInsertRowid);
+  const ev = (id, start) => Number(sdb.prepare('INSERT INTO events (checkin_event_id, ical_uid, start_at, end_at, title, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(id, `uid-started-${id}@example.com`, start, start.replace('T23:', 'T23:59:').slice(0, 19) + '.000Z', `Meeting ${id}`, iso()).lastInsertRowid);
+  const attend = (e, g) => sdb.prepare("INSERT INTO attendance (event_id, girl_id, signed_in_at, signed_out_at, open, source_txn_ids, fetched_at) VALUES (?, ?, ?, ?, 0, '[]', ?)").run(e, g, iso(), iso(), iso());
+  const plan = (e, role) => plans.putPlan(sdb, sdb.prepare('SELECT * FROM events WHERE id = ?').get(e), 'Pioneer/Patriot', { items: [{ requirementId: 'example-badge-pipa:2', role }] }, 'leader@example.com');
+  const ann = girl('Ann', 'Pioneer');
+  const bo = girl('Bo', 'Patriot');
+  const a = ev(501, '2026-10-01T23:00:00.000Z');
+  const b = ev(502, '2026-10-08T23:00:00.000Z');
+  const c = ev(503, '2026-10-15T23:00:00.000Z');
+  const d = ev(504, '2027-03-04T23:00:00.000Z'); // a later re-plan of the same requirement
+  plan(a, 'start'); plan(b, 'continue'); plan(c, 'finish'); plan(d, 'start');
+  const evRow = (e) => sdb.prepare('SELECT * FROM events WHERE id = ?').get(e);
+  const opts = { tz: TZ, now: '2026-10-10T12:00:00.000Z' };
+  const req2 = (g) => proposals.girlProgress(sdb, sdb.prepare('SELECT * FROM girls WHERE id = ?').get(g), opts)
+    .find((x) => x.badgeId === 'example-badge-pipa');
+  const r2 = (bdg) => bdg.groups.flatMap((gr) => gr.requirements).find((r) => r.requirementId === 'example-badge-pipa:2');
+  try {
+    assert.equal(r2(req2(ann)).started, null, 'nothing attended yet');
+    assert.equal(req2(ann).status, 'not_started');
+
+    attend(a, ann);
+    proposals.proposeForEvent(sdb, evRow(a), TZ);
+    assert.deepEqual(r2(req2(ann)).started, { attended: 1, planned: 3, startedOn: '2026-10-01', nextOn: '2026-10-15' },
+      'the missed continue is in the past, so the next one is the finish; the March re-plan is a separate chain');
+    assert.equal(r2(req2(ann)).state, 'none', 'state is still completion-only');
+    assert.deepEqual({ status: req2(ann).status, startedCount: req2(ann).startedCount }, { status: 'in_progress', startedCount: 1 });
+
+    attend(b, ann);
+    proposals.proposeForEvent(sdb, evRow(b), TZ);
+    assert.deepEqual(r2(req2(ann)).started, { attended: 2, planned: 3, startedOn: '2026-10-01', nextOn: '2026-10-15' });
+
+    const bp = proposals.badgeProgress(sdb, sdb.prepare("SELECT * FROM badges WHERE id = 'example-badge-pipa'").get(), opts);
+    const annRow = bp.girls.find((g) => g.girlId === ann);
+    assert.deepEqual(annRow.started['example-badge-pipa:2'], { attended: 2, planned: 3, startedOn: '2026-10-01', nextOn: '2026-10-15' });
+    assert.equal(annRow.states['example-badge-pipa:2'], undefined);
+    assert.deepEqual(bp.girls.find((g) => g.girlId === bo).started, {});
+
+    attend(c, ann); // finish → proposed completion replaces the started marker
+    proposals.proposeForEvent(sdb, evRow(c), TZ);
+    assert.equal(r2(req2(ann)).state, 'proposed');
+    assert.equal(r2(req2(ann)).started, null);
+  } finally { sdb.close(); }
+});
