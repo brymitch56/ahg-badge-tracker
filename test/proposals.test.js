@@ -468,18 +468,18 @@ test('started: attended start/continue meetings show as a started requirement wi
 
     attend(a, ann);
     proposals.proposeForEvent(sdb, evRow(a), TZ);
-    assert.deepEqual(r2(req2(ann)).started, { attended: 1, planned: 3, startedOn: '2026-10-01', nextOn: '2026-10-15' },
+    assert.deepEqual(r2(req2(ann)).started, { attended: 1, planned: 3, startedOn: '2026-10-01', nextOn: '2026-10-15', finishPlanned: true },
       'the missed continue is in the past, so the next one is the finish; the March re-plan is a separate chain');
     assert.equal(r2(req2(ann)).state, 'none', 'state is still completion-only');
     assert.deepEqual({ status: req2(ann).status, startedCount: req2(ann).startedCount }, { status: 'in_progress', startedCount: 1 });
 
     attend(b, ann);
     proposals.proposeForEvent(sdb, evRow(b), TZ);
-    assert.deepEqual(r2(req2(ann)).started, { attended: 2, planned: 3, startedOn: '2026-10-01', nextOn: '2026-10-15' });
+    assert.deepEqual(r2(req2(ann)).started, { attended: 2, planned: 3, startedOn: '2026-10-01', nextOn: '2026-10-15', finishPlanned: true });
 
     const bp = proposals.badgeProgress(sdb, sdb.prepare("SELECT * FROM badges WHERE id = 'example-badge-pipa'").get(), opts);
     const annRow = bp.girls.find((g) => g.girlId === ann);
-    assert.deepEqual(annRow.started['example-badge-pipa:2'], { attended: 2, planned: 3, startedOn: '2026-10-01', nextOn: '2026-10-15' });
+    assert.deepEqual(annRow.started['example-badge-pipa:2'], { attended: 2, planned: 3, startedOn: '2026-10-01', nextOn: '2026-10-15', finishPlanned: true });
     assert.equal(annRow.states['example-badge-pipa:2'], undefined);
     assert.deepEqual(bp.girls.find((g) => g.girlId === bo).started, {});
 
@@ -487,5 +487,11 @@ test('started: attended start/continue meetings show as a started requirement wi
     proposals.proposeForEvent(sdb, evRow(c), TZ);
     assert.equal(r2(req2(ann)).state, 'proposed');
     assert.equal(r2(req2(ann)).started, null);
+
+    // the March re-plan is a start with nothing after it yet: open-ended
+    attend(d, bo);
+    proposals.proposeForEvent(sdb, evRow(d), TZ);
+    assert.deepEqual(r2(req2(bo)).started, { attended: 1, planned: 1, startedOn: '2027-03-04', nextOn: null, finishPlanned: false },
+      'no finish planned, so 1/1 is a floor, not a full chain');
   } finally { sdb.close(); }
 });

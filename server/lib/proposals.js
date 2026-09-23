@@ -379,6 +379,9 @@ function startedFor(db, girlId, requirementId, { tz = 'UTC', now: nowIso = now()
     planned: run.length,
     startedOn: localDate(attended[0].start_at, tz),
     nextOn: next ? localDate(next.start_at, tz) : null,
+    // false while nothing closes the chain yet (only start/continue planned),
+    // so `planned` is a floor rather than the whole story
+    finishPlanned: run.length > 0 && ['session', 'finish'].includes(run[run.length - 1].role),
   };
 }
 
