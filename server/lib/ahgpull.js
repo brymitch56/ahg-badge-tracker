@@ -26,6 +26,7 @@
 const A = require('../../lib/ahgfamily');
 const { parseGridState, parseStandardState, parseAhgDate } = require('../../lib/parse');
 const mapping = require('./mapping');
+const ahgtrust = require('./ahgtrust');
 const { recordRun } = require('./mirror');
 
 class PullError extends Error {
@@ -48,7 +49,9 @@ async function makeLiveSession(db, { key = null, env = process.env } = {}) {
   if (creds.unreadable) throw new PullError('noconfig', 'stored AHGFamily credentials are unreadable (CRED_KEY missing or changed) — re-enter them');
   const acfg = { ...A.makeConfig(env), email: creds.email, password: creds.password };
   const jar = new A.CookieJar();
-  const { token } = await A.login(acfg, jar);
+  // password + the stored trusted-browser cookie (lib/ahgtrust.js): no code
+  // while the trust lasts; a code prompt or the MFA fence throws AUTH → latch
+  const { token } = await ahgtrust.signIn(db, acfg, jar, key);
   return {
     async grid(awardId, youthIds) {
       await A.sleep(acfg.throttleMs);
@@ -91,7 +94,7 @@ function activeBadges(db) {
  */
 async function pullAhgState(db, cfg, { sessionFactory = makeLiveSession, key = null, env = process.env, actor = 'system' } = {}) {
   const latch = mapping.getLatch(db);
-  if (latch) throw new PullError('latched', `AHGFamily is latched since ${latch.latchedAt} (${latch.error}) — re-enter credentials to clear`);
+  if (latch) throw new PullError('latched', `AHGFamily is latched since ${latch.latchedAt} (${latch.error}) — press Connect on the Admin page (or re-enter credentials) to clear`);
 
   const girls = db.prepare('SELECT * FROM girls WHERE active = 1 AND ahg_youth_id IS NOT NULL').all();
   const badges = activeBadges(db);

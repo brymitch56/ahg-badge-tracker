@@ -9,6 +9,7 @@ const { makeCheckinClient, CheckinError } = require('./lib/checkin');
 const mirror = require('./lib/mirror');
 const { verifySignature, markDelivery } = require('./lib/webhook');
 const mapping = require('./lib/mapping');
+const ahgtrust = require('./lib/ahgtrust');
 const girlmerge = require('./lib/girlmerge');
 const credcrypto = require('./lib/credcrypto');
 const plans = require('./lib/plans');
@@ -309,6 +310,7 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
     res.json({
       checkinConfigured: checkin.configured,
       ahgfamily: mapping.getLatch(db) ? 'latched' : mapping.credentialsState(db, credKey()),
+      ahgSignIn: ahgtrust.status(db),
       runs: lastByKind.map((r) => ({ kind: r.kind, startedAt: r.started_at, finishedAt: r.finished_at, ok: r.ok === null ? null : !!r.ok, summary: r.summary ? JSON.parse(r.summary) : null, error: r.error })),
       webhookDeliveries: db.prepare('SELECT COUNT(*) AS n FROM webhook_txns').get().n,
       queue: Object.fromEntries(db.prepare('SELECT status, COUNT(*) AS n FROM push_queue GROUP BY status').all().map((r) => [r.status, r.n])),
@@ -448,6 +450,28 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
       return res.status(500).json({ error: 'could not store credentials', detail: e.message });
     }
     return res.json({ ok: true, latchCleared: true });
+  });
+
+  // Second factor (lib/ahgtrust.js). Connect = one deliberate password
+  // sign-in; when AHGFamily texts a code, the prompt is parked and the admin
+  // enters it below, which earns the 30-day trusted-browser cookie. Each
+  // Connect press may text the account holder — the page says so.
+  const connectErr = (res, e) => {
+    const status = { noconfig: 400, bad: 400, enroll: 409, latched: 409, expired: 410, rejected: 422 }[e.code] || 502;
+    return res.status(status).json({ error: e.message, kind: e.code || null, latched: !!mapping.getLatch(db), ...ahgtrust.status(db) });
+  };
+  api.get('/admin/ahgfamily/signin', admin, (req, res) => {
+    res.json({ latched: mapping.getLatch(db), credentials: mapping.credentialsState(db, credKey()), ...ahgtrust.status(db) });
+  });
+  api.post('/admin/ahgfamily/connect', admin, async (req, res) => {
+    try {
+      return res.json(await ahgtrust.connect(db, { key: credKey(), actor: req.user.email }));
+    } catch (e) { return connectErr(res, e); }
+  });
+  api.post('/admin/ahgfamily/code', admin, async (req, res) => {
+    try {
+      return res.json(await ahgtrust.enterCode(db, { code: (req.body || {}).code, key: credKey(), actor: req.user.email }));
+    } catch (e) { return connectErr(res, e); }
   });
 
   api.get('/admin/mapping', admin, (req, res) => {

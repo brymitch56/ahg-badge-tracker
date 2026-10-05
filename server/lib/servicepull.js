@@ -113,7 +113,7 @@ async function withAuthLatch(db, fn) {
  */
 async function pullServiceState(db, cfg, { sessionFactory = ahgpull.makeLiveSession, key = null, env = process.env, actor = 'system' } = {}) {
   const latch = mapping.getLatch(db);
-  if (latch) throw new PullError('latched', `AHGFamily is latched since ${latch.latchedAt} (${latch.error}) — re-enter credentials to clear`);
+  if (latch) throw new PullError('latched', `AHGFamily is latched since ${latch.latchedAt} (${latch.error}) — press Connect on the Admin page (or re-enter credentials) to clear`);
   const girls = db.prepare('SELECT * FROM girls WHERE active = 1 AND ahg_youth_id IS NOT NULL ORDER BY id').all();
   if (!girls.length) throw new PullError('noconfig', 'no girls are mapped to AHGFamily yet — run the mapping screen first');
 

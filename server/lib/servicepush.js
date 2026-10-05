@@ -130,7 +130,7 @@ const savedSig = (state, exceptId = null) => state.records
 async function pushStarInstances(db, cfg, { sessionFactory = ahgpull.makeLiveSession, key = null, env = process.env, actor = 'system', limit = 50 } = {}) {
   if (!pushEnabled(db)) return { skipped: 'push disabled', pushed: 0, held: 0, failed: 0 };
   const latch = mapping.getLatch(db);
-  if (latch) throw new PullError('latched', `AHGFamily is latched since ${latch.latchedAt} (${latch.error}) — re-enter credentials to clear`);
+  if (latch) throw new PullError('latched', `AHGFamily is latched since ${latch.latchedAt} (${latch.error}) — press Connect on the Admin page (or re-enter credentials) to clear`);
   if (!mapping.hasStoredCredentials(db, key)) throw new PullError('noconfig', 'no AHGFamily credentials — enter them via the admin screen');
 
   const rows = db.prepare("SELECT * FROM push_queue WHERE action = 'add_instance' AND status = 'queued' ORDER BY id LIMIT ?").all(limit);
@@ -270,7 +270,7 @@ async function pushRequirementMarks(db, cfg, { sessionFactory = ahgpull.makeLive
   if (!pushEnabled(db)) return { skipped: 'push disabled', pushed: 0, held: 0, failed: 0, skippedRows: 0 };
   if (!pushRequirementsEnabled(db)) return { skipped: 'requirement push disabled', pushed: 0, held: 0, failed: 0, skippedRows: 0 };
   const latch = mapping.getLatch(db);
-  if (latch) throw new PullError('latched', `AHGFamily is latched since ${latch.latchedAt} (${latch.error}) — re-enter credentials to clear`);
+  if (latch) throw new PullError('latched', `AHGFamily is latched since ${latch.latchedAt} (${latch.error}) — press Connect on the Admin page (or re-enter credentials) to clear`);
   if (!mapping.hasStoredCredentials(db, key)) throw new PullError('noconfig', 'no AHGFamily credentials — enter them via the admin screen');
   const { requirementNote } = require('./reqnote');
 

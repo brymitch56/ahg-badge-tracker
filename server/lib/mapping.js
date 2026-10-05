@@ -81,7 +81,7 @@ async function fetchAdvancementIndexHtml(db, key = null, env = process.env) {
   if (creds.unreadable) throw Object.assign(new Error('stored AHGFamily credentials are unreadable (CRED_KEY missing or changed) — re-enter them'), { code: 'noconfig' });
   const acfg = { ...A.makeConfig(env), email: creds.email, password: creds.password };
   const jar = new A.CookieJar();
-  await A.login(acfg, jar);
+  await require('./ahgtrust').signIn(db, acfg, jar, key);
   try {
     await A.sleep(acfg.throttleMs);
     return await A.getPage(acfg, jar, '/advancement/index?level=all&style=grid');
@@ -97,7 +97,7 @@ async function fetchAdvancementIndexHtml(db, key = null, env = process.env) {
 async function refreshYouthSelect(db, { fetchHtml = fetchAdvancementIndexHtml, key = null, env = process.env, actor = null } = {}) {
   const latch = getLatch(db);
   if (latch) {
-    throw Object.assign(new Error(`AHGFamily is latched since ${latch.latchedAt} (${latch.error}) — re-enter credentials to clear`), { code: 'latched' });
+    throw Object.assign(new Error(`AHGFamily is latched since ${latch.latchedAt} (${latch.error}) — press Connect on the Admin page (or re-enter credentials) to clear`), { code: 'latched' });
   }
   return recordRun(db, 'pull', async () => {
     let html;
