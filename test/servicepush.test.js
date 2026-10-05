@@ -245,6 +245,12 @@ const reqSessionFactory = async () => ({
     return `<form>${Object.entries(req.items).map(([id, it]) => reqPanel(id, it)).join('')}${blankPanel(`adbl${String(req.fetches).padStart(8, '0')}`.slice(0, 12))}</form>`;
   },
   async page() { return outerPage(); },
+  // Grid view of the same state — Push now pulls first (pullThenPush), and
+  // the pull reads this to decide what to queue.
+  async grid(awardId) {
+    if (awardId !== 'aw0000example') return '<table></table>';
+    return `<table>${Object.entries(req.items).map(([id, it]) => `<tr><td><div class="advance-icon" data-id="${id}" data-yt="${Y_BEA}" data-value="${it.checked ? 1 : 0}"></div></td></tr>`).join('')}</table>`;
+  },
   async save(bodyPairs) {
     req.saves += 1; req.bodies.push(bodyPairs);
     if (req.swallow) return { status: 200, html: '' };
@@ -360,7 +366,10 @@ test('requirement push: already checked → skipped without a write; swallowed s
   enqueueMark(c.id);
   let id = queueMark();
   let r = await (await rget('/api/v1/sync/push', { method: 'POST' })).json();
-  assert.deepEqual({ skipped: r.requirements.skippedRows, saves: req.saves }, { skipped: 1, saves: 0 });
+  // the pull that Push now runs first already sees it ticked and skips the row
+  assert.equal(req.saves, 0);
+  assert.ok(r.pull && r.pull.skippedQueue >= 1, 'skipped by the pre-push pull');
+  assert.equal(rdb.prepare('SELECT status FROM push_queue WHERE id = ?').get(id).status, 'skipped');
   assert.match(rdb.prepare('SELECT last_error FROM push_queue WHERE id = ?').get(id).last_error, /already complete/);
   resetReq(); req.swallow = true;
   enqueueMark(c.id);
@@ -415,4 +424,36 @@ test('scheduler: weekly push only while push_enabled and something is queued; on
   assert.equal(mails.length, 2);
   assert.match(mails[1].subject, /1 HELD/);
   assert.match((await (await rget('/api/v1/sync/push-report')).json()).text, /HELD/);
+});
+
+// 2026-10-05: 43 completions confirmed on the Review page, then Push now —
+// "nothing to push", because only a pull queues requirement marks. Push now
+// now pulls first.
+test('Push now on a confirmed-but-never-queued completion: pulls, queues, pushes', async () => {
+  await setupReq();
+  resetReq();
+  const c = rdb.prepare("SELECT * FROM completions WHERE girl_id = ? AND requirement_id = 'example-badge-pipa:1' AND status = 'confirmed'").get(rgirl);
+  rdb.prepare('DELETE FROM push_queue').run();
+  rdb.prepare('DELETE FROM conflicts').run(); // earlier tests leave an 'un-ticked' conflict, which rightly blocks queuing
+  rdb.prepare("UPDATE ahg_state SET completed = 0 WHERE girl_id = ? AND requirement_id = 'example-badge-pipa:1'").run(rgirl);
+  assert.equal(servicepush.unqueuedConfirmedCount(rdb), 1);
+  assert.equal((await (await rget('/api/v1/sync/status')).json()).awaitingQueue, 1, 'the admin page can show it');
+  const r = await (await rget('/api/v1/sync/push', { method: 'POST' })).json();
+  assert.equal(r.pull.queued, 1, 'the pull queued it');
+  assert.equal(r.requirements.pushed, 1, 'and the push sent it');
+  assert.equal(req.saves, 1);
+  assert.equal(rdb.prepare('SELECT status FROM push_queue WHERE completion_id = ?').get(c.id).status, 'sent');
+  assert.equal(servicepush.unqueuedConfirmedCount(rdb), 0);
+});
+
+test('scheduler: confirmed-but-unqueued completions make the weekly push due (it pulls first)', async () => {
+  await setupReq();
+  resetReq();
+  rdb.prepare('DELETE FROM push_queue').run();
+  rdb.prepare('DELETE FROM conflicts').run(); // earlier tests leave an 'un-ticked' conflict, which rightly blocks queuing
+  rdb.prepare("UPDATE ahg_state SET completed = 0 WHERE girl_id = ? AND requirement_id = 'example-badge-pipa:1'").run(rgirl);
+  reportLib.setReportMode(rdb, 'errors_only', 'admin@example.com');
+  const sched = makeScheduler({ cfg: rcfg, db: rdb, client: makeCheckinClient({ base: '', apiKey: '' }), credKey: KEY, ahgSessionFactory: reqSessionFactory, mailer: async () => {}, log: () => {} });
+  const out = await sched.tick(Date.now() + 40 * 24 * 3600e3);
+  assert.equal(out.pushRequirements && out.pushRequirements.pushed, 1);
 });

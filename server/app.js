@@ -317,6 +317,7 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
       openConflicts: db.prepare("SELECT COUNT(*) AS n FROM conflicts WHERE status = 'open'").get().n,
       pushEnabled: servicepush.pushEnabled(db),
       pushRequirementsEnabled: servicepush.pushRequirementsEnabled(db),
+      awaitingQueue: servicepush.unqueuedConfirmedCount(db), // confirmed completions the next pull (Push now) will queue
       reportMode: report.reportMode(db),
       mailConfigured: !!(cfg.mail && cfg.mail.smtpUrl && cfg.mail.from && cfg.mail.to.length),
     });
@@ -381,10 +382,10 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
   api.post('/sync/push', admin, async (req, res) => {
     const opts = { ...(ahgSessionFactory ? { sessionFactory: ahgSessionFactory } : {}), key: credKey(), actor: req.user.email };
     try {
-      const stars = await servicepush.pushStarInstances(db, cfg, opts);
-      const requirements = mapping.getLatch(db) ? null : await servicepush.pushRequirementMarks(db, cfg, opts);
+      // pull first: confirmed requirement completions are queued by the pull
+      const { pull, stars, requirements } = await servicepush.pullThenPush(db, cfg, opts);
       const sent = await report.sendPushReport(db, cfg, { stars, requirements }, { ...(mailer ? { mailer } : {}), trigger: 'manual', actor: req.user.email });
-      res.json({ ...stars, requirements, report: sent });
+      res.json({ ...stars, requirements, pull, report: sent });
     } catch (e) {
       if (e instanceof ahgpull.PullError) {
         try { await report.sendPushReport(db, cfg, { stars: { skipped: e.message } }, { ...(mailer ? { mailer } : {}), trigger: 'manual', actor: req.user.email }); } catch { /* report is best effort */ }
