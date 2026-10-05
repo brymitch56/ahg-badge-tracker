@@ -83,12 +83,17 @@ function makeScheduler({ cfg, db, client, credKey = null, ahgSessionFactory = un
     // Weekly AHGFamily push (spec §7, decided) — only while an admin has the
     // push_enabled flag on; the requirement push additionally needs its own
     // flag. One run report is mailed afterwards (report_mode decides when).
+    // Due when something is queued OR confirmed completions await queuing
+    // (only a pull queues those — pullThenPush runs it first).
     if (servicepush.pushEnabled(db) && age(lastOk('push')) >= PUSH_EVERY_MS && !mapping.getLatch(db) && mapping.hasStoredCredentials(db, credKey)
-        && db.prepare("SELECT 1 FROM push_queue WHERE status = 'queued' LIMIT 1").get()) {
+        && (db.prepare("SELECT 1 FROM push_queue WHERE status = 'queued' LIMIT 1").get()
+          || (servicepush.pushRequirementsEnabled(db) && servicepush.unqueuedConfirmedCount(db) > 0))) {
       const opts = { ...(ahgSessionFactory ? { sessionFactory: ahgSessionFactory } : {}), key: credKey };
       try {
-        out.push = await servicepush.pushStarInstances(db, cfg, opts);
-        if (!mapping.getLatch(db)) out.pushRequirements = await servicepush.pushRequirementMarks(db, cfg, opts);
+        const r = await servicepush.pullThenPush(db, cfg, opts);
+        out.push = r.stars;
+        out.pushRequirements = r.requirements;
+        if (r.pull && !r.pull.skipped) out.pushPull = r.pull;
       } catch (e) {
         log(`[tracker] weekly AHGFamily push failed: ${e.message}`);
         out.pushError = e.message;

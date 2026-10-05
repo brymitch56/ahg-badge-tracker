@@ -355,7 +355,43 @@ async function pushRequirementMarks(db, cfg, { sessionFactory = ahgpull.makeLive
   });
 }
 
+// ------------------------------------------------------- pull, then push ---
+// Requirement completions are queued only by the AHGFamily PULL (ahgpull's
+// rule-6 reconcile: confirmed here, not ticked there → queue), because only
+// a fresh read can tell "not on AHGFamily yet" from "already ticked there".
+// So "confirm on the Review page → Push now" used to push NOTHING until a
+// pull happened to run in between (found 2026-10-05: 43 confirmed items,
+// two "nothing to push" runs). Every push therefore pulls first. Stars need
+// no pull — confirming a star proposal queues it directly.
+
+/** Confirmed completions not yet queued/sent and not known ticked on AHGFamily. */
+function unqueuedConfirmedCount(db) {
+  return db.prepare(`
+    SELECT COUNT(*) AS n FROM completions c
+    JOIN girls g ON g.id = c.girl_id AND g.active = 1 AND g.ahg_youth_id IS NOT NULL
+    WHERE c.status = 'confirmed'
+      AND NOT EXISTS (SELECT 1 FROM push_queue q WHERE q.completion_id = c.id AND q.status IN ('queued', 'sent'))
+      AND NOT EXISTS (SELECT 1 FROM ahg_state s WHERE s.girl_id = c.girl_id AND s.requirement_id = c.requirement_id AND s.completed = 1)`).get().n;
+}
+
+/**
+ * The push entry point (Push now and the weekly push): refresh the
+ * requirement queue with a pull — ALWAYS, never "a recent pull will do": a
+ * completion confirmed a minute after the last pull would be missed — then
+ * push stars, then requirement marks. A latch at any step stops the rest
+ * (rule 8). Returns { pull, stars, requirements }.
+ */
+async function pullThenPush(db, cfg, opts = {}) {
+  let pull = null;
+  const mapped = db.prepare('SELECT 1 FROM girls WHERE active = 1 AND ahg_youth_id IS NOT NULL LIMIT 1').get();
+  if (pushRequirementsEnabled(db) && mapped) pull = await ahgpull.pullAhgState(db, cfg, opts);
+  const stars = await pushStarInstances(db, cfg, opts);
+  const requirements = mapping.getLatch(db) ? null : await pushRequirementMarks(db, cfg, opts);
+  return { pull, stars, requirements };
+}
+
 module.exports = {
+  pullThenPush, unqueuedConfirmedCount,
   pushStarInstances, pushRequirementMarks, pushEnabled, setPushEnabled, pushRequirementsEnabled, setPushRequirementsEnabled,
   toFormDate, serializeForm, panelPairsWithStar, fragmentPairs,
 };
