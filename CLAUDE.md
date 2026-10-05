@@ -41,6 +41,13 @@ branding belongs in env/config on the deployment, not in the source.
 The fetch scripts may call only:
 
 - `GET /login`, `POST /login` (session), `GET /logout`
+- `GET`/`POST /site/sms-verify` — the texted sign-in code, posted only by
+  `lib/ahgfamily.js submitCode()` with a code a person typed on the Admin
+  page (with "trust this browser" on). `GET /user/mfa-setup` is read only to
+  recognise the MFA-enrollment fence; nothing on it is ever pressed —
+  enrolling (SMS consent, phone number) is a person's job, in a browser.
+  Never automate code retrieval (no SMS/e-mail relay): see
+  `server/lib/ahgtrust.js`.
 - `GET /advancement/index?…` (page shell: `#badge-select`, `#youth-select`)
 - `POST /advancement/badge-tracker-view` (HTML fragment; read-only)
 
@@ -64,6 +71,9 @@ catalog/fetch script never writes.
 
 Auth failures are terminal: exit immediately, never retry in a loop
 (AHGFamily may lock the account). Throttle every request (~300 ms).
+A sign-in-code prompt and the MFA fence ARE auth failures (they latch):
+every password sign-in may text the account holder, so a background job
+must never meet a code prompt twice.
 
 ## Catalog rules
 
