@@ -159,7 +159,9 @@ test('empty PUT deletes the plan; audit trail records put and delete', async () 
   const adminT = await token({ groups: [GROUP], preferred_username: 'admin@example.com' });
   const r = await put(`/api/v1/events/${eventId}/plans/Explorer`, t, { items: [] });
   assert.equal(r.status, 200);
-  assert.deepEqual(await r.json(), { deleted: true });
+  const out = await r.json();
+  assert.equal(out.deleted, true);
+  assert.ok('proposals' in out, 'a saved plan reports what it proposed (nothing, here)');
   const left = await (await get(`/api/v1/events/${eventId}/plans`, t)).json();
   assert.deepEqual(left.map((p) => p.levelGroup), ['Pioneer/Patriot']);
   const audit = await (await get('/api/v1/admin/audit', adminT)).json();

@@ -87,9 +87,54 @@ function proposeForEvent(db, event, tz) {
     }
     const stale = db.prepare('SELECT * FROM participation WHERE event_id = ?').all(event.id).filter((p) => !attended.has(p.girl_id));
     for (const p of stale) db.prepare('DELETE FROM participation WHERE girl_id = ? AND plan_item_id = ?').run(p.girl_id, p.plan_item_id);
+
+    // ---- reconcile a PLAN edit: an item re-planned from finish/session to
+    // start/continue no longer completes anything at this meeting. Same rule
+    // as rule 5: a proposed row is withdrawn, a confirmed one is flagged for a
+    // leader — never silently reverted.
+    const demoted = db.prepare(`
+      SELECT c.* FROM completions c JOIN plan_items pi ON pi.id = c.plan_item_id
+      WHERE c.event_id = ? AND c.source = 'attendance' AND c.status <> 'rejected' AND pi.role IN ('start', 'continue')`).all(event.id);
+    for (const c of demoted) {
+      if (c.status === 'proposed') {
+        db.prepare('DELETE FROM completions WHERE id = ?').run(c.id);
+        auditRow(db, 'system', 'completion.withdraw', c.id, { girlId: c.girl_id, requirementId: c.requirement_id, eventId: event.id, reason: 'plan item is no longer a finish' }, null);
+        summary.withdrawn += 1;
+      } else if (!c.needs_review) {
+        db.prepare('UPDATE completions SET needs_review = 1, review_reason = ? WHERE id = ?')
+          .run('plan changed after confirmation: this meeting is no longer the finish for this requirement', c.id);
+        auditRow(db, 'system', 'completion.flag', c.id, null, { reason: 'plan changed after confirmation' });
+        summary.flagged += 1;
+      }
+    }
   });
   run();
   return summary;
+}
+
+/**
+ * After a leader saves (or moves) plans for an event that has ALREADY
+ * started: refresh its attendance from check-in, then apply rule 3 so the
+ * girls who attended get "ready to review" rows for the newly planned
+ * finish/session items. Before this, proposals were made only by the
+ * check-in webhook, the 7-day sweep and "Sync check-in now" (14 days), so a
+ * plan added or fixed after the meeting proposed nothing (2026-10-11).
+ * A future event is left alone — nobody has attended it yet. If check-in is
+ * unreachable, the attendance already mirrored is used and the response
+ * says so. `client` is the check-in client; refresh is injectable for tests.
+ */
+async function proposeAfterPlanChange(db, client, event, tz, { refresh = null, nowIso = new Date().toISOString() } = {}) {
+  if (!event || event.start_at > nowIso) return { skipped: 'event has not started' };
+  let warning = null;
+  if (event.checkin_event_id != null && client && client.configured !== false) {
+    try {
+      await (refresh || require('./mirror').refreshAttendance)(db, client, event);
+    } catch (e) {
+      warning = `attendance not refreshed from check-in (${e.message}) — used the attendance already on file`;
+    }
+  }
+  const s = proposeForEvent(db, event, tz);
+  return { ...s, ...(warning ? { warning } : {}) };
 }
 
 // ------------------------------------------------------------- proposals --
@@ -472,7 +517,7 @@ function badgeProgress(db, badge, { tz = 'UTC', now: nowIso = now() } = {}) {
 
 module.exports = {
   PLAN_GIRL_LEVELS, CompletionError, localDate,
-  proposeForEvent, eventProposals, decide, manualCompletion, deleteCompletion,
+  proposeForEvent, proposeAfterPlanChange, eventProposals, decide, manualCompletion, deleteCompletion,
   badgeStatusFor, girlProgress, badgeProgress, startedFor,
 };
 
