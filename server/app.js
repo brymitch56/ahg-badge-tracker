@@ -196,25 +196,36 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
     return fn(e);
   };
   api.get('/events/:id/plans', leader, (req, res) => withEvent(req, res, (e) => res.json(plans.getPlans(db, e.id))));
-  api.put('/events/:id/plans/:levelGroup', leader, (req, res) => withEvent(req, res, (e) => {
+  // A plan saved for a meeting that has already happened proposes at once
+  // for the girls who attended (proposals.proposeAfterPlanChange) — the
+  // response's `proposals` says how many are now waiting on the Review page.
+  api.put('/events/:id/plans/:levelGroup', leader, (req, res) => withEvent(req, res, async (e) => {
+    let out;
     try {
-      return res.json(plans.putPlan(db, e, req.params.levelGroup, req.body, req.user.email));
+      out = plans.putPlan(db, e, req.params.levelGroup, req.body, req.user.email);
     } catch (err) {
       if (err instanceof plans.PlanError) return res.status(err.status).json({ error: err.message });
       throw err;
     }
+    const p = await proposals.proposeAfterPlanChange(db, checkin, e, cfg.tz);
+    return res.json({ ...out, proposals: p });
   }));
 
   // Move every plan from one event to another (a renamed calendar entry).
-  api.post('/events/:id/plans/move', leader, (req, res) => withEvent(req, res, (e) => {
+  // Completions travel with the plans; the target is then re-checked against
+  // its own attendance (and proposes, if it has already happened).
+  api.post('/events/:id/plans/move', leader, (req, res) => withEvent(req, res, async (e) => {
     const target = db.prepare('SELECT * FROM events WHERE id = ?').get(Number((req.body || {}).toEventId));
     if (!target) return res.status(404).json({ error: 'target event not found' });
+    let out;
     try {
-      return res.json(plans.movePlans(db, e, target, req.user.email));
+      out = plans.movePlans(db, e, target, req.user.email);
     } catch (err) {
       if (err instanceof plans.PlanError) return res.status(err.status).json({ error: err.message });
       throw err;
     }
+    const p = out.moved.length ? await proposals.proposeAfterPlanChange(db, checkin, target, cfg.tz) : null;
+    return res.json({ ...out, proposals: p });
   }));
 
   // -------------------------------------------------- review queue --------
