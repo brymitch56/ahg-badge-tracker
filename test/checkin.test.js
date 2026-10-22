@@ -238,6 +238,9 @@ test('routes: POST /sync/checkin (admin) full refresh; /sync/status; /health che
   assert.equal((await (await fetch(base + '/health')).json()).checkin, 'ok');
 });
 
+// The fixture meeting is dated 2026-09-01; the default window (today −30 days)
+// stopped covering it in October and this test started failing on main.
+const FIXTURE_WINDOW = { from: '2026-08-01', to: '2026-12-31' };
 test('syncEvents: a renamed feed entry (new ical uid) marks the old event removed and moves its plans to the same-time twin', async () => {
   // the meeting at 42 gets renamed on the calendar → a NEW uid and id; 42 vanishes from the feed
   const old = db.prepare('SELECT * FROM events WHERE checkin_event_id = 42').get();
@@ -245,20 +248,100 @@ test('syncEvents: a renamed feed entry (new ical uid) marks the old event remove
   const renamed = { ...state.events[0], id: 99, ical_uid: 'uid-meeting-1-renamed@example.com', title: 'Service Hour Meeting' };
   const original = state.events[0];
   state.events[0] = renamed;
-  const s = await mirror.syncEvents(db, client);
+  const s = await mirror.syncEvents(db, client, FIXTURE_WINDOW);
   assert.deepEqual({ removed: s.removed, plansMoved: s.plansMoved, created: s.created }, { removed: 1, plansMoved: 1, created: 1 });
   const twin = db.prepare('SELECT * FROM events WHERE checkin_event_id = 99').get();
   assert.equal(db.prepare('SELECT removed_from_feed FROM events WHERE id = ?').get(old.id).removed_from_feed, 1);
   assert.equal(db.prepare('SELECT event_id FROM plans WHERE level_group = ?').get('Explorer').event_id, twin.id, 'plans followed the meeting');
   assert.ok(db.prepare("SELECT 1 FROM audit_log WHERE action = 'plan.move' AND actor = 'system'").get());
   // idempotent: a second sync changes nothing
-  const s2 = await mirror.syncEvents(db, client);
+  const s2 = await mirror.syncEvents(db, client, FIXTURE_WINDOW);
   assert.deepEqual({ removed: s2.removed, plansMoved: s2.plansMoved }, { removed: 0, plansMoved: 0 });
   // an absent event WITHOUT plans is just marked; a removed event with two same-time twins is left for a human
   state.events[0] = original; // restore the fixture for later tests
   db.prepare('DELETE FROM plans WHERE event_id = ?').run(twin.id);
   db.prepare('DELETE FROM events WHERE id = ?').run(twin.id);
   db.prepare('UPDATE events SET removed_from_feed = 0 WHERE id = ?').run(old.id);
-  await mirror.syncEvents(db, client);
+  await mirror.syncEvents(db, client, FIXTURE_WINDOW);
   assert.equal(db.prepare('SELECT removed_from_feed FROM events WHERE id = ?').get(old.id).removed_from_feed, 0);
+});
+
+// 2026-10-19/20: the portal served one empty feed, then changed every UID's
+// shape. The check-in app deleted its event rows and re-created them with new
+// ids, so the events here holding leaders' plans were flagged removed and empty
+// duplicates appeared. The portal event id inside the UID ties them together.
+test('portalIdOf: both portal UID shapes; foreign UIDs are not portal events', () => {
+  assert.equal(mirror.portalIdOf('ABCDEFGHI-evfakeid0001-20260720T162540'), 'evfakeid0001');
+  assert.equal(mirror.portalIdOf('ABCDEFGHI-evfakeid0001@ahgfamily.org'), 'evfakeid0001');
+  assert.equal(mirror.portalIdOf('uid-meeting-1@example.com'), null);
+  assert.equal(mirror.portalIdOf('googlecalendar-evfakeid0001@google.com'), null);
+  assert.equal(mirror.portalIdOf(null), null);
+});
+
+test('syncEvents: re-created check-in event (new id, new UID shape) folds the empty duplicate into the event holding the plans', async () => {
+  const saved = state.events;
+  const W = { from: '2026-11-01', to: '2026-12-31' };
+  const base = { tlc_event_id: null, source: 'ical', title: 'Weekly Meeting', location: 'Hall', all_day: 0, track_adults: 0, removed_from_feed: 0, requires_permission_form: 0 };
+  // as it was: a mirrored meeting with a plan on it
+  state.events = [{ ...base, id: 136, ical_uid: 'ABCDEFGHI-evfakeid0002-20260720T162545', start_at: '2026-11-02T23:15:00.000Z', end_at: '2026-11-03T01:15:00.000Z' }];
+  await mirror.syncEvents(db, client, W);
+  const orig = db.prepare('SELECT * FROM events WHERE checkin_event_id = 136').get();
+  db.prepare("INSERT INTO plans (event_id, level_group, created_by, created_at) VALUES (?, 'Pioneer', 'leader@example.com', '2026-10-01T00:00:00Z')").run(orig.id);
+  // night 1: empty feed → the check-in app lists nothing; the event is marked removed
+  state.events = [];
+  await mirror.syncEvents(db, client, W);
+  assert.equal(db.prepare('SELECT removed_from_feed FROM events WHERE id = ?').get(orig.id).removed_from_feed, 1);
+  // night 2: the same portal event, re-created with a NEW check-in id and the @domain UID
+  const recreated = { ...base, id: 308, ical_uid: 'ABCDEFGHI-evfakeid0002@ahgfamily.org', start_at: '2026-11-02T23:15:00.000Z', end_at: '2026-11-03T01:15:00.000Z' };
+  state.events = [recreated];
+  const s = await mirror.syncEvents(db, client, W);
+  assert.deepEqual({ created: s.created, merged: s.merged }, { created: 0, merged: 0 }, 'matched straight to the original');
+  let row = db.prepare('SELECT * FROM events WHERE id = ?').get(orig.id);
+  assert.deepEqual({ ce: row.checkin_event_id, uid: row.ical_uid, gone: row.removed_from_feed }, { ce: 308, uid: recreated.ical_uid, gone: 0 });
+
+  // the state production is ALREADY in: an empty duplicate holds the new id
+  db.prepare('UPDATE events SET checkin_event_id = NULL, removed_from_feed = 1, ical_uid = ? WHERE id = ?').run('ABCDEFGHI-evfakeid0002-20260720T162545', orig.id);
+  db.prepare(`INSERT INTO events (checkin_event_id, ical_uid, start_at, end_at, title, all_day, removed_from_feed, updated_at)
+              VALUES (308, ?, '2026-11-02T23:15:00.000Z', '2026-11-03T01:15:00.000Z', 'Weekly Meeting', 0, 0, '2026-10-21T01:50:10Z')`).run(recreated.ical_uid);
+  const s2 = await mirror.syncEvents(db, client, W);
+  assert.equal(s2.merged, 1);
+  row = db.prepare('SELECT * FROM events WHERE checkin_event_id = 308').get();
+  assert.equal(row.id, orig.id, 'the event with the plan is current again');
+  assert.equal(row.removed_from_feed, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM events WHERE ical_uid LIKE ?').get('%evfakeid0002%').n, 1, 'duplicate gone');
+  assert.equal(db.prepare("SELECT event_id FROM plans WHERE level_group = 'Pioneer'").get().event_id, orig.id);
+  // idempotent
+  const s3 = await mirror.syncEvents(db, client, W);
+  assert.deepEqual({ created: s3.created, merged: s3.merged, removed: s3.removed }, { created: 0, merged: 0, removed: 0 });
+
+  // two live check-in events sharing one portal id: never guessed between
+  db.prepare("DELETE FROM plans WHERE level_group = 'Pioneer'").run();
+  state.events = [recreated, { ...recreated, id: 309, start_at: '2026-11-09T23:15:00.000Z', end_at: '2026-11-10T01:15:00.000Z' }];
+  const s4 = await mirror.syncEvents(db, client, W);
+  assert.equal(s4.created, 1, 'the second one is its own event');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM events WHERE ical_uid = ?').get(recreated.ical_uid).n, 2);
+  state.events = saved;
+});
+
+test('syncEvents: check-in folds its own split back to the ORIGINAL id — the duplicate holding the new UID is folded in, no UNIQUE clash', async () => {
+  const saved = state.events;
+  const W = { from: '2026-11-01', to: '2026-12-31' };
+  const base = { tlc_event_id: null, source: 'ical', title: 'Weekly Meeting', location: 'Hall', all_day: 0, track_adults: 0, removed_from_feed: 0, requires_permission_form: 0,
+    start_at: '2026-11-16T23:15:00.000Z', end_at: '2026-11-17T01:15:00.000Z' };
+  const newUid = 'ABCDEFGHI-evfakeid0003@ahgfamily.org';
+  const ins = db.prepare(`INSERT INTO events (checkin_event_id, ical_uid, start_at, end_at, title, all_day, removed_from_feed, updated_at)
+                          VALUES (?, ?, '2026-11-16T23:15:00.000Z', '2026-11-17T01:15:00.000Z', 'Weekly Meeting', 0, ?, '2026-10-21T01:50:10Z')`);
+  const orig = ins.run(140, 'ABCDEFGHI-evfakeid0003-20260720T162550', 1).lastInsertRowid; // flagged, holds the plan
+  const dup = ins.run(312, newUid, 0).lastInsertRowid;                                     // empty, holds the new uid+start
+  db.prepare("INSERT INTO plans (event_id, level_group, created_by, created_at) VALUES (?, 'Patriot', 'leader@example.com', '2026-10-01T00:00:00Z')").run(orig);
+  // the check-in app now lists the ORIGINAL id with the new uid; 312 no longer exists there
+  state.events = [{ ...base, id: 140, ical_uid: newUid }];
+  const s = await mirror.syncEvents(db, client, W);
+  assert.equal(s.merged, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM events WHERE id = ?').get(dup).n, 0, 'empty duplicate folded away');
+  const row = db.prepare('SELECT * FROM events WHERE id = ?').get(orig);
+  assert.deepEqual({ ce: row.checkin_event_id, uid: row.ical_uid, gone: row.removed_from_feed }, { ce: 140, uid: newUid, gone: 0 });
+  assert.equal(db.prepare("SELECT event_id FROM plans WHERE level_group = 'Patriot'").get().event_id, orig);
+  db.prepare("DELETE FROM plans WHERE level_group = 'Patriot'").run();
+  state.events = saved;
 });

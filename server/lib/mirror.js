@@ -53,22 +53,81 @@ async function recordRun(db, kind, fn) {
  * unedited event's uid and start do not. (It is unique in both apps' schemas,
  * but unique is not the same as stable.) Manual events have no ical_uid and
  * rely on the id alone.
+ *
+ * The LAST resort is the portal's own event id inside the UID (portalIdOf).
+ * On 2026-10-19/20 the portal served one empty feed and then changed every
+ * UID's shape: the check-in app deleted its event rows and re-created them
+ * with new ids, so neither match above could find the events here that held
+ * the leaders' plans, and empty duplicates took their place. A row matched by
+ * portal id is the same event; when the row the id match found is such an
+ * empty duplicate, it is folded away so plans, attendance and completions
+ * stay with the event (`merged`). Only when this portal id appears ONCE in the
+ * check-in answer — never guessed between two live events.
  */
-function upsertEvent(db, ev) {
+// <head>-<event id>-<tail> (the tail changes on edit) or, since 2026-10-20 on
+// AHGfamily, <head>-<event id>@<portal domain>. Same rule as the check-in app.
+const PORTAL_UID = /^[a-z0-9]{9,24}-([a-z0-9]{10,14})(?:-[a-z0-9]{10,24}|@(?:[a-z0-9-]+\.)*(?:ahgfamily\.org|traillifeconnect\.com))$/i;
+const portalIdOf = (uid) => { const m = PORTAL_UID.exec(String(uid || '').trim()); return m ? m[1] : null; };
+const EVENT_REF_TABLES = ['plans', 'attendance', 'completions', 'participation'];
+const attachedCount = (db, id) => EVENT_REF_TABLES
+  .reduce((n, t) => n + db.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE event_id = ?`).get(id).n, 0);
+
+function upsertEvent(db, ev, { portalIdCount = null } = {}) {
   const ts = now();
-  const found = db.prepare('SELECT id FROM events WHERE checkin_event_id = ?').get(ev.id)
+  let merged = false;
+  let found = db.prepare('SELECT id FROM events WHERE checkin_event_id = ?').get(ev.id)
     || (ev.ical_uid ? db.prepare('SELECT id FROM events WHERE ical_uid = ? AND start_at = ?').get(ev.ical_uid, ev.start_at) : null);
-  if (found) {
-    db.prepare(`UPDATE events SET checkin_event_id = ?, ical_uid = ?, start_at = ?, end_at = ?, title = ?, location = ?,
-                all_day = ?, removed_from_feed = ?, updated_at = ? WHERE id = ?`)
-      .run(ev.id, ev.ical_uid, ev.start_at, ev.end_at, ev.title, ev.location || null,
-        ev.all_day ? 1 : 0, ev.removed_from_feed ? 1 : 0, ts, found.id);
-    return { id: found.id, created: false };
-  }
-  const r = db.prepare(`INSERT INTO events (checkin_event_id, ical_uid, start_at, end_at, title, location, all_day, removed_from_feed, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(ev.id, ev.ical_uid, ev.start_at, ev.end_at, ev.title, ev.location || null, ev.all_day ? 1 : 0, ev.removed_from_feed ? 1 : 0, ts);
-  return { id: r.lastInsertRowid, created: true };
+  const pid = portalIdOf(ev.ical_uid);
+  const run = db.transaction(() => {
+    if (pid && (!portalIdCount || portalIdCount.get(pid) === 1)) {
+      const kin = db.prepare('SELECT id, ical_uid FROM events WHERE ical_uid LIKE ? OR ical_uid LIKE ? ORDER BY id')
+        .all(`%-${pid}-%`, `%-${pid}@%`)
+        .filter((r) => (!found || r.id !== found.id) && portalIdOf(r.ical_uid) === pid)
+        .map((r) => ({ id: r.id, n: attachedCount(db, r.id) }))
+        .sort((a, b) => b.n - a.n || a.id - b.id);
+      if (kin.length && !found) found = { id: kin[0].id };
+      else if (kin.length && kin[0].n > 0 && attachedCount(db, found.id) === 0) {
+        // the id match is an empty duplicate; the event's history is on kin[0]
+        db.prepare('DELETE FROM events WHERE id = ?').run(found.id);
+        found = { id: kin[0].id };
+        merged = true;
+      }
+    }
+    if (found) {
+      // UNIQUE (ical_uid, start_at): another row may already hold the pair this
+      // row is about to take (the empty duplicate, when the check-in app folded
+      // its own split back to the original id). Fold it in if it is empty;
+      // if it is the one with history, it becomes the row; if both carry
+      // history, keep this row's old uid rather than guess.
+      let uid = ev.ical_uid;
+      const holder = uid ? db.prepare('SELECT id FROM events WHERE ical_uid = ? AND start_at = ? AND id <> ?').get(uid, ev.start_at, found.id) : null;
+      if (holder) {
+        if (attachedCount(db, holder.id) === 0) {
+          db.prepare('UPDATE events SET checkin_event_id = NULL WHERE id = ?').run(holder.id);
+          db.prepare('DELETE FROM events WHERE id = ?').run(holder.id);
+          merged = true;
+        } else if (attachedCount(db, found.id) === 0) {
+          db.prepare('DELETE FROM events WHERE id = ?').run(found.id);
+          found = holder;
+          merged = true;
+        } else {
+          uid = db.prepare('SELECT ical_uid FROM events WHERE id = ?').get(found.id).ical_uid;
+        }
+      }
+      // the check-in id may still sit on another (stale) row; it is UNIQUE too
+      db.prepare('UPDATE events SET checkin_event_id = NULL WHERE checkin_event_id = ? AND id <> ?').run(ev.id, found.id);
+      db.prepare(`UPDATE events SET checkin_event_id = ?, ical_uid = ?, start_at = ?, end_at = ?, title = ?, location = ?,
+                  all_day = ?, removed_from_feed = ?, updated_at = ? WHERE id = ?`)
+        .run(ev.id, uid, ev.start_at, ev.end_at, ev.title, ev.location || null,
+          ev.all_day ? 1 : 0, ev.removed_from_feed ? 1 : 0, ts, found.id);
+      return { id: found.id, created: false, merged };
+    }
+    const r = db.prepare(`INSERT INTO events (checkin_event_id, ical_uid, start_at, end_at, title, location, all_day, removed_from_feed, updated_at)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(ev.id, ev.ical_uid, ev.start_at, ev.end_at, ev.title, ev.location || null, ev.all_day ? 1 : 0, ev.removed_from_feed ? 1 : 0, ts);
+    return { id: r.lastInsertRowid, created: true, merged };
+  });
+  return run();
 }
 
 /**
@@ -84,8 +143,14 @@ async function syncEvents(db, client, { from, to } = {}) {
   to = to || isoDate(new Date(today.getTime() + 365 * 86400e3));
   return recordRun(db, 'checkin_events', async () => {
     const rows = await client.events({ from, to });
-    let created = 0;
-    for (const ev of rows) if (upsertEvent(db, ev).created) created += 1;
+    let created = 0, merged = 0;
+    const portalIdCount = new Map();
+    for (const ev of rows) { const p = portalIdOf(ev.ical_uid); if (p) portalIdCount.set(p, (portalIdCount.get(p) || 0) + 1); }
+    for (const ev of rows) {
+      const u = upsertEvent(db, ev, { portalIdCount });
+      if (u.created) created += 1;
+      if (u.merged) merged += 1;
+    }
     // Absences: a mirrored event inside the fetched window that the check-in
     // app no longer lists is gone from the feed (a renamed or re-saved
     // calendar entry gets a NEW iCal identity, so it reappears as a
@@ -103,7 +168,7 @@ async function syncEvents(db, client, { from, to } = {}) {
       const twins = db.prepare('SELECT * FROM events WHERE id <> ? AND removed_from_feed = 0 AND start_at = ?').all(e.id, e.start_at);
       if (twins.length === 1) plansMoved += plans.movePlans(db, e, twins[0], 'system').moved.length;
     }
-    return { from, to, fetched: rows.length, created, updated: rows.length - created, removed: stale.length, plansMoved };
+    return { from, to, fetched: rows.length, created, updated: rows.length - created, removed: stale.length, plansMoved, merged };
   });
 }
 
@@ -277,5 +342,5 @@ async function syncCheckin(db, client, { attendanceDays = 14, tz = 'America/New_
 
 module.exports = {
   AHG_LEVELS, normalizeLevel, recordRun,
-  upsertEvent, upsertGirl, findGirl, syncEvents, syncPeople, refreshAttendance, syncCheckin, handleWebhook,
+  upsertEvent, portalIdOf, upsertGirl, findGirl, syncEvents, syncPeople, refreshAttendance, syncCheckin, handleWebhook,
 };
