@@ -128,34 +128,108 @@ function buildBadge(ann, award, { fetchedAt = null, annotationFile = null } = {}
       imageSlug: award.imageSlug || null, classic: !!ann.classic, frontier: frontier.value || frontierForName(award.name),
       handbook: { edition: 'current', pages: [], images: [], ...(ann.handbook || {}) },
       intro: ann.intro || null, ahgHistory: ann.ahgHistory || null, faithConnection: ann.faithConnection || null,
-      groups, requirementCount: creqs.length,
+      groups, requirementCount: creqs.length, textSource: 'handbook',
       source: { ahgfamilyFetchedAt: fetchedAt, annotationFile, builtAt: new Date().toISOString() },
     },
   };
 }
 
+// ------------------------------------------------------------ faith ------
+// handbook/faith.json: the Faith Award (AHGFamily's B.Y. Faith Award, one
+// per level), the handbook badges tagged as faith badges, and which award
+// study each badge satisfies. Absent file → no faith build.
+function loadFaithConfig(file = path.join(__dirname, '..', 'handbook', 'faith.json')) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+}
+
+/** 'award' | 'badge' | null for a catalog award under a faith config. */
+function faithTag(award, faith) {
+  if (!faith || !award) return null;
+  if (Object.values(faith.faithAward || {}).includes(award.awardId)) return 'award';
+  const names = new Set((faith.faithBadges || []).map(normBadgeName));
+  return names.has(normBadgeName(award.name)) ? 'badge' : null;
+}
+
+// AHGFamily marks a study it no longer accepts by its title.
+const RETIRED_TITLE = /\(retired\b/i;
+
+/**
+ * Pure: a catalog award → a badge built from AHGFamily's short titles alone,
+ * for awards the handbook doesn't print (the Faith Award) and faith badges
+ * not annotated yet. `text` is the short title; `textSource: 'ahgfamily'`
+ * tells the website the handbook wording is still to come. Items AHGFamily
+ * titles "(Retired)" are kept (their ids stay mappable) but flagged
+ * `retired`, and are never offered for planning.
+ */
+function buildCatalogOnly(award, { fetchedAt = null, faith = null } = {}) {
+  if (!award) return { errors: ['award not in catalog'] };
+  const errors = [];
+  if (award.retired) errors.push('award is retired on AHGFamily — not buildable');
+  if (award.wholeAwardOnly) errors.push('award has no requirement items on AHGFamily (whole-award only)');
+  const cgroups = (award.groups || []).filter((g) => g.plannable !== false);
+  if (!cgroups.length) errors.push('award has no current requirement groups');
+  if (errors.length) return { errors };
+  const { LEVELS, slugify } = require('./scaffold-annotation');
+  const lv = LEVELS[award.levelGroup] || { code: slugify(award.levelGroup), levels: [award.levelGroup] };
+  const creqs = catalogRequirements({ groups: cgroups });
+  const groups = cgroups.map((g, gi) => ({
+    label: g.label,
+    rule: g.rule || null,
+    requirements: creqs.filter((r) => r.groupIndex === gi).map((r) => ({
+      number: r.number, ...(r.letter ? { letter: r.letter } : {}),
+      ahgFamilyId: r.id, title: r.title, text: r.title, subItems: [], flags: RETIRED_TITLE.test(r.title) ? ['retired'] : [],
+    })),
+  }));
+  return {
+    badge: {
+      // the id scaffold-annotation's slug builds to, so a later handbook
+      // annotation replaces this badge in place
+      id: `${slugify(award.name)}-${lv.code}`,
+      awardId: award.awardId, name: award.name, levelGroup: award.levelGroup, levels: lv.levels,
+      imageSlug: award.imageSlug || null, classic: false, frontier: frontierForName(award.name),
+      handbook: { edition: 'current', pages: [], images: [] },
+      intro: null, ahgHistory: null, faithConnection: null,
+      groups, requirementCount: creqs.length, textSource: 'ahgfamily',
+      ...(faith ? { faith } : {}),
+      source: { ahgfamilyFetchedAt: fetchedAt, annotationFile: null, builtAt: new Date().toISOString() },
+    },
+  };
+}
+
+/** Catalog awards the faith config asks for: every Faith Award level plus each current faith badge variant. */
+function faithAwardIds(indexAwards, faith) {
+  if (!faith) return [];
+  const ids = new Set(Object.values(faith.faithAward || {}));
+  for (const a of indexAwards || []) if (!a.retired && faithTag(a, faith) === 'badge') ids.add(a.awardId);
+  return [...ids];
+}
+
 function main(argv) {
-  let check = false; let only = null; let dir = null; let example = false;
+  let check = false; let only = null; let dir = null; let example = false; let noFaith = false;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--check') check = true;
     else if (argv[i] === '--only') only = argv[++i];
     else if (argv[i] === '--handbook-dir') dir = argv[++i];
     else if (argv[i] === '--example') example = true;
+    else if (argv[i] === '--no-faith') noFaith = true;
   }
   const paths = makePaths();
   const handbookDir = dir ? path.resolve(dir) : path.join(path.dirname(paths.root), 'handbook');
   const outDir = path.join(path.dirname(paths.root), 'badges');
+  const faith = noFaith ? null : loadFaithConfig();
   const files = [];
   if (fs.existsSync(handbookDir)) for (const f of fs.readdirSync(handbookDir)) if (f.endsWith('.json')) files.push(path.join(handbookDir, f));
   if (example) files.push(path.join(__dirname, '..', 'handbook', 'example.json'));
   const selected = files.filter((f) => !only || path.basename(f, '.json') === only);
-  if (!selected.length) { console.error(`No annotations found in ${handbookDir}${only ? ` matching ${only}` : ''}. See handbook/README.md.`); process.exit(1); }
+  if (!selected.length && !faith) { console.error(`No annotations found in ${handbookDir}${only ? ` matching ${only}` : ''}. See handbook/README.md.`); process.exit(1); }
 
+  const readAward = (id) => { const p = path.join(paths.awards, `${id}.json`); return fs.existsSync(p) ? readJson(p) : null; };
+  const write = (b) => { if (!check) { fs.mkdirSync(outDir, { recursive: true }); fs.writeFileSync(path.join(outDir, `${b.id}.json`), JSON.stringify(b, null, 2) + '\n'); } };
   let built = 0; let refused = 0;
+  const annotated = new Set(); // award ids built from a handbook annotation
   for (const file of selected) {
     const ann = readJson(file);
-    const awardPath = path.join(paths.awards, `${ann.awardId}.json`);
-    const award = fs.existsSync(awardPath) ? readJson(awardPath) : null;
+    const award = readAward(ann.awardId);
     const r = buildBadge(ann, award, { fetchedAt: award && award.source ? award.source.fetchedAt || null : null, annotationFile: path.basename(file) });
     if (r.errors) {
       refused++;
@@ -165,12 +239,36 @@ function main(argv) {
     }
     built++;
     const b = r.badge;
+    const tag = faithTag(award, faith);
+    if (tag) b.faith = tag;
+    annotated.add(b.awardId);
     console.log(`✓ ${path.basename(file)} → ${b.id}.json  (${b.requirementCount} requirements in ${b.groups.length} groups, pages ${b.handbook.pages.join('–') || '?'})`);
-    if (!check) { fs.mkdirSync(outDir, { recursive: true }); fs.writeFileSync(path.join(outDir, `${b.id}.json`), JSON.stringify(b, null, 2) + '\n'); }
+    write(b);
   }
-  console.log(`\n${built} built, ${refused} refused${check ? ' (check only — nothing written)' : ` → ${outDir}`}`);
+
+  // Faith awards and faith badges without a buildable annotation: from
+  // AHGFamily's short titles, so the Faith tab can plan and track them now.
+  let fromCatalog = 0;
+  if (faith && !only) {
+    const index = readJson(paths.index);
+    for (const id of faithAwardIds(index.awards, faith)) {
+      if (annotated.has(id)) continue;
+      const award = readAward(id);
+      const r = buildCatalogOnly(award, { fetchedAt: award && award.source ? award.source.fetchedAt || null : null, faith: faithTag(award, faith) });
+      if (r.errors) {
+        refused++;
+        console.log(`✗ faith ${award ? `${award.name} (${award.levelGroup})` : id}`);
+        for (const m of r.errors) console.log(`    - ${m}`);
+        continue;
+      }
+      fromCatalog++;
+      console.log(`✓ faith ${r.badge.name} (${r.badge.levelGroup}) → ${r.badge.id}.json  (${r.badge.requirementCount} requirements, AHGFamily titles only)`);
+      write(r.badge);
+    }
+  }
+  console.log(`\n${built} built, ${fromCatalog ? `${fromCatalog} faith from AHGFamily titles, ` : ''}${refused} refused${check ? ' (check only — nothing written)' : ` → ${outDir}`}`);
   process.exit(refused ? 1 : 0);
 }
 
 if (require.main === module) main(process.argv.slice(2));
-module.exports = { FRONTIERS, normalizeFrontier, frontierForName, buildBadge, catalogRequirements };
+module.exports = { FRONTIERS, normalizeFrontier, frontierForName, buildBadge, catalogRequirements, loadFaithConfig, faithTag, buildCatalogOnly, faithAwardIds };

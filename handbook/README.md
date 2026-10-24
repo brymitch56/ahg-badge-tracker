@@ -96,3 +96,68 @@ Output shape (`data/badges/<slug>.json`):
 
 `title` is AHGFamily's short label; `text` is the handbook's. Retired
 awards and non-current editions never reach `data/badges/`.
+
+## Faith: the Faith Award and faith badges (`handbook/faith.json`)
+
+The Faith Award is AHGFamily's **B.Y. Faith Award** — one award per level
+(a different colored pin each), each a single "complete one of the
+following studies" list. The handbooks don't print it, so it is built from
+AHGFamily's short titles alone. `handbook/faith.json` (committable — AHG
+program structure, no handbook prose) names:
+
+- `faithAward` — the award id per level;
+- `faithBadges` — handbook badges tagged as faith badges (every current
+  level variant, matched loosely by name);
+- `links` — which award study each faith badge satisfies ("Bible Basics
+  Badge" → Bible Basics). Earning the badge at a level makes that level's
+  award item *ready to record* on the website's Faith tab.
+
+`npm run build:badges` builds every faith award and faith badge that has no
+buildable annotation **from AHGFamily's titles** (`textSource: "ahgfamily"`,
+`text` = the short title; studies AHGFamily titles "(Retired)" are kept but
+flagged `retired` and never offered for planning). The build uses the same
+id the scaffold's slug produces, so annotating a faith badge later
+(`npm run scaffold:annotation -- "Bible Basics" --level Explorer`, fill,
+build, re-import) replaces its text in place. `--no-faith` skips the faith
+build. AHGFamily's patch programs on the award list (Girls in Prayer, I
+Choose Truth, NBB Believe…) are whole-award-only there, so their steps
+come from the Faith Award guide instead (below); a study the tracker has no
+steps for is planned as one item on the Faith Award.
+
+Known gap: AHGFamily gives no group rules for the Tenderheart and Explorer
+**Women of Faith** badges, so their AHGFamily-titles build treats every
+group as "complete all" until the handbook annotation supplies the rules.
+
+### Faith Award studies, step by step (`data/faith-studies/`)
+
+The studies themselves (Girls in Prayer, Believe, I Choose Truth, Back2Back,
+7 C's of History, Biblical Worldview…) are broken into steps per level —
+chapters, lessons, "choose N of these" — from AHG's *Faith Award Program
+Guide*, so a unit plans them step by step like a badge. That guide is AHG's
+copyrighted text, so the definitions live only in
+`data/faith-studies/*.json` (gitignored). Shape:
+
+```json
+{ "studies": [ { "slug": "example-study", "name": "Example Study",
+  "awardItem": "Example Study Patch Program",
+  "about": "…", "source": "Faith Award Program Guide pp. …",
+  "variants": [ { "levelGroup": "Explorer", "groups": [
+    { "label": "Choose 2 of 3", "rule": { "type": "n_of", "n": 2 },
+      "steps": [ { "title": "…", "text": "…" }, { "title": "Activity 1", "placeholder": true } ] } ] } ] } ] }
+```
+
+- `awardItem` is the study's title on AHGFamily's Faith Award list; a
+  finished study makes that item *ready to record*. `null` = a study the
+  guide approves but AHGFamily doesn't list yet — the Faith tab counts it as
+  earned and a leader marks the award on AHGFamily by hand.
+- `placeholder` steps are slots for choices the guide leaves to the leader
+  (activities, projects, verses); leaders rename them on the Faith tab
+  ("What counts" → Steps).
+
+Load with `npm run import:faith-studies` (or the Faith tab's **Load study
+steps**, admin). Loading is **insert-only**: a study/level already in the
+tracker is never changed, so renamed steps, plans and completions survive.
+Studies are tracker-owned badges (`faith = 'study'`): the catalog build
+never deactivates them, and they are never pulled from or pushed to
+AHGFamily.
+

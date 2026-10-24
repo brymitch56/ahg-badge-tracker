@@ -1,0 +1,27 @@
+{
+  "_source": "AHG program structure from AHGFamily, not handbook prose — committable. The Faith Award is AHGFamily's \"B.Y. Faith Award\": one award per level (a different colored pin each), each a single \"complete one of the following studies\" list. The handbooks don't print it; AHGFamily's list is the only source, so it is built from the catalog's short titles (scripts/build-badges.js, catalog-only). Lists differ a little by level (Patriots add Live It Out; retired studies vary) — always read the level's own award.",
+  "faithAward": {
+    "Tenderheart": "awdfjs9554oq",
+    "Explorer": "awdfjs9554or",
+    "Pioneer": "awdfjs9554os",
+    "Patriot": "awdfjs9554ot"
+  },
+  "_faithBadges": "Handbook badges tagged as faith badges, by catalog name (every current level variant). Until a badge's handbook annotation exists in data/handbook/, it is built from AHGFamily's short titles so it can be planned and tracked now; the annotation replaces the text later under the same ids.",
+  "faithBadges": [
+    "Bible Basics",
+    "Daughter of the King",
+    "Identity",
+    "Mission Minded",
+    "Women of Faith",
+    "All God's Children",
+    "Biblical Leadership"
+  ],
+  "_links": "Faith Award study title (as AHGFamily lists it) → the faith badge that satisfies it. Earning the badge at a level completes that level's Faith Award item. Studies not listed here (patch programs, outside studies) are planned and recorded on the Faith Award item itself — AHGFamily keeps those patch programs as whole-award-only, with no requirements to track.",
+  "links": {
+    "Bible Basics Badge": "Bible Basics",
+    "Daughter of the King Badge": "Daughter of the King",
+    "Identity Badge": "Identity",
+    "Mission Minded Badge": "Mission Minded",
+    "Women of Faith Badge": "Women of Faith"
+  }
+}

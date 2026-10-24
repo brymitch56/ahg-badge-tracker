@@ -1,6 +1,6 @@
 {
   "name": "ahg-badge-tracker",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "private": true,
   "description": "Leaders-only badge requirement tracker for an American Heritage Girls troop — AHGFamily catalog fetch tooling (phase 1).",
   "license": "MIT",
@@ -13,12 +13,13 @@
     "reparse": "node scripts/reparse-raw.js",
     "fetch:staging": "node scripts/fetch-ahgfamily-catalog.js --staging --keep-raw",
     "diff": "node scripts/diff-catalog.js",
-    "test": "node --test test/parse.test.js test/service.test.js test/stars.test.js test/diff.test.js test/build.test.js test/server.test.js test/checkin.test.js test/mapping.test.js test/plans.test.js test/proposals.test.js test/ahgpull.test.js test/servicepull.test.js test/servicepush.test.js test/backup.test.js test/access.test.js test/girlmerge.test.js test/pathfinder.test.js test/ahgtrust.test.js test/planproposals.test.js",
+    "test": "node --test test/parse.test.js test/service.test.js test/stars.test.js test/diff.test.js test/build.test.js test/server.test.js test/checkin.test.js test/mapping.test.js test/plans.test.js test/proposals.test.js test/ahgpull.test.js test/servicepull.test.js test/servicepush.test.js test/backup.test.js test/access.test.js test/girlmerge.test.js test/pathfinder.test.js test/ahgtrust.test.js test/planproposals.test.js test/faith.test.js",
     "start": "node server/index.js",
     "migrate": "node server/scripts/migrate.js",
     "import:catalog": "node server/scripts/import-catalog.js",
     "build:badges": "node scripts/build-badges.js",
-    "scaffold:annotation": "node scripts/scaffold-annotation.js"
+    "scaffold:annotation": "node scripts/scaffold-annotation.js",
+    "import:faith-studies": "node server/scripts/import-faith-studies.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.4.1",

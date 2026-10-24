@@ -13,6 +13,8 @@ function makeConfig(env = process.env) {
     dataDir,
     dbPath: env.DB_PATH ? path.resolve(env.DB_PATH) : path.join(dataDir, 'tracker.db'),
     badgesDir: env.BADGES_DIR ? path.resolve(env.BADGES_DIR) : path.join(dataDir, 'badges'),
+    // Faith Award study definitions (copyrighted guide content — data/, never git)
+    faithStudiesDir: env.FAITH_STUDIES_DIR ? path.resolve(env.FAITH_STUDIES_DIR) : path.join(dataDir, 'faith-studies'),
     siteOrigin: (env.SITE_ORIGIN || '').replace(/\/$/, ''),
     tz: env.TZ || 'America/New_York',
     auth: {

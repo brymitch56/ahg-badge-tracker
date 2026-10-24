@@ -51,9 +51,14 @@ function proposeForEvent(db, event, tz) {
       const levels = PLAN_GIRL_LEVELS[plan.level_group] || [];
       const girls = db.prepare(`SELECT * FROM girls WHERE active = 1 AND ahg_level IN (${levels.map(() => '?').join(',')})`).all(...levels)
         .filter((g) => attended.has(g.id));
-      const items = db.prepare('SELECT * FROM plan_items WHERE plan_id = ?').all(plan.id);
+      const items = db.prepare(`SELECT pi.*, b.level_group AS badge_level_group FROM plan_items pi
+        JOIN requirements r ON r.id = pi.requirement_id JOIN badges b ON b.id = r.badge_id WHERE pi.plan_id = ?`).all(plan.id);
       for (const item of items) {
+        // a one-level award in the Pioneer/Patriot plan (each level's Faith
+        // Award) is only for girls at that level
+        const onlyLevel = item.badge_level_group === 'Pioneer' || item.badge_level_group === 'Patriot' ? item.badge_level_group : null;
         for (const g of girls) {
+          if (onlyLevel && g.ahg_level !== onlyLevel) continue;
           if (item.role === 'start' || item.role === 'continue') {
             const r = db.prepare('INSERT OR IGNORE INTO participation (girl_id, plan_item_id, event_id, recorded_at) VALUES (?, ?, ?, ?)')
               .run(g.id, item.id, event.id, now());
