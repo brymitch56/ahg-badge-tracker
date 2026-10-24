@@ -14,6 +14,26 @@
 > report is still unset on the Pi, and the AHGFamily comment-length limit is
 > still unmeasured.
 
+> **Update — Oct 24, 2026 (v0.3.0, 167 tests): the Faith tab.** Migration 011
+> adds a second plan *track* — the website's new Faith page plans each
+> unit's faith work (faith badge requirements, Faith Award studies, and
+> standalone Bible studies with the lesson) on the same plan rows as the
+> badge planner, which now sees only its own track. The Faith Award
+> (AHGFamily's B.Y. Faith Award, one per level) and the faith badges build
+> from AHGFamily's short titles until annotated — see handbook/README.md
+> "Faith" and `handbook/faith.json`. `server/lib/faith.js` derives each
+> girl's award (earned / waiting on Review / ready to record via a finished
+> faith badge / under way); "Record" writes a manual completion. The weekly
+> pull now always includes the four Faith Awards. A one-level badge
+> (Pioneer or Patriot) in the Pioneer/Patriot plan now proposes only to
+> girls at that level. **Faith Award studies** are broken into steps per
+> level from AHG's Faith Award Program Guide (11 studies, 31 level variants,
+> data/faith-studies/ — copyrighted, gitignored; handbook/README.md "Faith
+> Award studies"): tracker-owned badges (`faith = 'study'`), insert-only
+> load, leader-renamable placeholder steps, never pulled or pushed. To
+> deploy: build + copy data/badges/ and data/faith-studies/ + Re-import +
+> Faith tab → What counts → Load study steps.
+
 Read `CLAUDE.md` first (public repo, PII rules, read-only AHGFamily rule,
 copyright rule). Then this file, then `docs/tracker-service-spec.md`
 (draft 3) and `docs/service-stars-plan.md` (draft 2, next feature).

@@ -19,6 +19,7 @@ const servicepull = require('./lib/servicepull');
 const servicepush = require('./lib/servicepush');
 const report = require('./lib/report');
 const access = require('./lib/access');
+const faith = require('./lib/faith');
 
 let VERSION = null;
 try { VERSION = require(path.join(__dirname, '..', 'package.json')).version; } catch { /* stripped install */ }
@@ -97,7 +98,8 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
   api.get('/badges', leader, (req, res) => {
     const levelGroup = typeof req.query.levelGroup === 'string' ? req.query.levelGroup : null;
     const frontier = typeof req.query.frontier === 'string' ? req.query.frontier : null;
-    res.json(catalog.listBadges(db, { levelGroup, frontier, includeInactive: req.query.includeInactive === '1' }));
+    const faithQ = ['award', 'badge', 'any'].includes(req.query.faith) ? req.query.faith : null;
+    res.json(catalog.listBadges(db, { levelGroup, frontier, faith: faithQ, includeInactive: req.query.includeInactive === '1' }));
   });
   api.get('/badges/:id', leader, (req, res) => {
     const b = catalog.getBadge(db, req.params.id);
@@ -165,12 +167,14 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
     const rows = db.prepare(`SELECT * FROM events WHERE start_at >= ? AND start_at <= ?
                              AND (removed_from_feed = 0 OR EXISTS (SELECT 1 FROM plans p WHERE p.event_id = events.id)) ORDER BY start_at`).all(from, to);
     const att = db.prepare('SELECT event_id, COUNT(*) AS total, SUM(open) AS open FROM attendance GROUP BY event_id').all();
-    const plans = db.prepare('SELECT event_id, level_group FROM plans').all();
+    const badgePlans = plans.trackLevelGroups(db, 'badges');
+    const faithPlans = plans.trackLevelGroups(db, 'faith');
     const byEvent = new Map(att.map((a) => [a.event_id, a]));
     res.json(rows.map((e) => ({
       ...eventOut(e),
       attendance: byEvent.has(e.id) ? { total: byEvent.get(e.id).total, open: byEvent.get(e.id).open || 0 } : null,
-      planLevelGroups: plans.filter((p) => p.event_id === e.id).map((p) => p.level_group),
+      planLevelGroups: badgePlans.get(e.id) || [],
+      faithLevelGroups: faithPlans.get(e.id) || [],
     })));
   });
   api.get('/events/:id', leader, (req, res) => {
@@ -225,6 +229,46 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
       throw err;
     }
     const p = out.moved.length ? await proposals.proposeAfterPlanChange(db, checkin, target, cfg.tz) : null;
+    return res.json({ ...out, proposals: p });
+  }));
+
+  // ------------------------------------------------------------- faith --
+  // The Faith tab (server/lib/faith.js): the faith track of each meeting's
+  // plan, standalone Bible studies, and the Faith Award per girl.
+  const faithErr = (res, err) => {
+    if (err instanceof plans.PlanError || err instanceof proposals.CompletionError || err instanceof faith.StudyError) return res.status(err.status).json({ error: err.message });
+    throw err;
+  };
+  // Faith Award studies: load the step definitions (data/faith-studies/,
+  // insert-only) and rename a step (a placeholder becomes the chosen activity).
+  api.post('/admin/faith/studies/import', admin, (req, res) => {
+    try { return res.json(faith.importStudiesFromDir(db, cfg.faithStudiesDir, req.user.email)); } catch (err) { return faithErr(res, err); }
+  });
+  api.patch('/faith/steps/:requirementId', leader, (req, res) => {
+    try { return res.json(faith.updateStep(db, req.params.requirementId, req.body, req.user.email)); } catch (err) { return faithErr(res, err); }
+  });
+  api.get('/faith', leader, (req, res) => res.json(faith.faithCatalog(db, { allStudies: req.query.allStudies === '1' })));
+  api.get('/faith/year', leader, (req, res) => {
+    try { return res.json(faith.faithYear(db, { from: req.query.from, to: req.query.to })); } catch (err) { return faithErr(res, err); }
+  });
+  api.get('/faith/awards', leader, (req, res) => res.json(faith.awardStatus(db)));
+  api.post('/faith/awards/record', leader, (req, res) => {
+    try { return res.json({ recorded: faith.recordLinked(db, req.body, req.user.email) }); } catch (err) { return faithErr(res, err); }
+  });
+  api.get('/faith/studies', leader, (req, res) => res.json(faith.listStudies(db, { all: req.query.all === '1' })));
+  api.post('/faith/studies', leader, (req, res) => {
+    try { return res.status(201).json(faith.createStudy(db, req.body, req.user.email)); } catch (err) { return faithErr(res, err); }
+  });
+  api.patch('/faith/studies/:id', leader, (req, res) => {
+    try { return res.json(faith.updateStudy(db, req.params.id, req.body, req.user.email)); } catch (err) { return faithErr(res, err); }
+  });
+  api.get('/events/:id/faith-plans', leader, (req, res) => withEvent(req, res, (e) => res.json(plans.getPlans(db, e.id, { track: 'faith' }))));
+  api.put('/events/:id/faith-plans/:levelGroup', leader, (req, res) => withEvent(req, res, async (e) => {
+    let out;
+    try {
+      out = plans.putPlan(db, e, req.params.levelGroup, req.body, req.user.email, { track: 'faith' });
+    } catch (err) { return faithErr(res, err); }
+    const p = await proposals.proposeAfterPlanChange(db, checkin, e, cfg.tz);
     return res.json({ ...out, proposals: p });
   }));
 

@@ -369,7 +369,8 @@ function unqueuedConfirmedCount(db) {
   return db.prepare(`
     SELECT COUNT(*) AS n FROM completions c
     JOIN girls g ON g.id = c.girl_id AND g.active = 1 AND g.ahg_youth_id IS NOT NULL
-    WHERE c.status = 'confirmed'
+    JOIN requirements r ON r.id = c.requirement_id JOIN badges b ON b.id = r.badge_id
+    WHERE c.status = 'confirmed' AND (b.faith IS NULL OR b.faith <> 'study') -- faith studies never reach AHGFamily
       AND NOT EXISTS (SELECT 1 FROM push_queue q WHERE q.completion_id = c.id AND q.status IN ('queued', 'sent'))
       AND NOT EXISTS (SELECT 1 FROM ahg_state s WHERE s.girl_id = c.girl_id AND s.requirement_id = c.requirement_id AND s.completed = 1)`).get().n;
 }

@@ -78,13 +78,21 @@ async function makeLiveSession(db, { key = null, env = process.env } = {}) {
   };
 }
 
-/** Badges worth pulling: active AND touched by this troop (spec §7 — never all 548). */
+/**
+ * Badges worth pulling: active AND touched by this troop (spec §7 — never all
+ * 548), plus each level's Faith Award, so an award earned on AHGFamily shows
+ * on the Faith tab before anyone plans it (four requests). Faith studies
+ * (faith = 'study', built from the Faith Award guide) exist only here —
+ * AHGFamily has no requirements for them — so they are never pulled and
+ * their completions never queue.
+ */
 function activeBadges(db) {
   return db.prepare(`
-    SELECT DISTINCT b.* FROM badges b WHERE b.active = 1 AND (
+    SELECT DISTINCT b.* FROM badges b WHERE b.active = 1 AND (b.faith IS NULL OR b.faith <> 'study') AND (
       EXISTS (SELECT 1 FROM requirements r JOIN completions c ON c.requirement_id = r.id AND c.status <> 'rejected' WHERE r.badge_id = b.id)
       OR EXISTS (SELECT 1 FROM requirements r JOIN plan_items pi ON pi.requirement_id = r.id WHERE r.badge_id = b.id)
       OR EXISTS (SELECT 1 FROM requirements r JOIN ahg_state s ON s.requirement_id = r.id WHERE r.badge_id = b.id)
+      OR b.faith = 'award'
     ) ORDER BY b.id`).all();
 }
 
