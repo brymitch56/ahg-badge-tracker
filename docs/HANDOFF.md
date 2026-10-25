@@ -113,9 +113,10 @@ copyright rule). Then this file, then `docs/tracker-service-spec.md`
   Kitchen Scientist, Medical, Native American, Our Heritage, Robotics,
   Zoology × tend/expl) — they fail the build with "empty text" until
   filled, which is expected. Flow: fill → `npm run build:badges` → scp
-  `data/badges/` to the Pi → Admin "Re-import". Future: OCR/photograph
-  handbook pages and have a session fill scaffolds directly (pilot badges
-  were done this way). Handbook text never enters git.
+  `data/badges/` to the Pi → Admin "Re-import". Tenderheart/Explorer: the full
+  handbook is scanned, page images extracted and every remaining badge
+  scaffolded; sessions fill them in 12 segments per
+  `docs/handbook-ocr-plan.md`. Handbook text never enters git.
 
 ## Next work (in likely order)
 

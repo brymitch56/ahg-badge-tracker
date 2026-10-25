@@ -19,12 +19,16 @@
     "import:catalog": "node server/scripts/import-catalog.js",
     "build:badges": "node scripts/build-badges.js",
     "scaffold:annotation": "node scripts/scaffold-annotation.js",
-    "import:faith-studies": "node server/scripts/import-faith-studies.js"
+    "import:faith-studies": "node server/scripts/import-faith-studies.js",
+    "extract:handbook-pages": "node --max-old-space-size=8000 scripts/extract-handbook-pages.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.4.1",
     "express": "^5.2.1",
     "jose": "^6.2.12",
     "nodemailer": "^10.0.9"
+  },
+  "devDependencies": {
+    "pdf-lib": "^1.17.1"
   }
 }
