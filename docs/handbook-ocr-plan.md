@@ -95,6 +95,29 @@ different files, so they can run in any order, even in parallel.
 The catalog is the authority on what needs filling. If `--list` names a
 badge that isn't in this table, or the reverse (a level that doesn't exist
 in the catalog), follow `--list` and note it in the segment report.
+Once Step 0 has run, `--list` counts every scaffolded badge as done, so
+measure progress with `node scripts/build-badges.js --check` instead: an
+unfilled scaffold shows up as refused for "empty text".
+
+## Results (Oct 24, 2026)
+
+All 12 segments ran. `build-badges --check`: 198 built, 2 refused. Pages
+and catalog matched everywhere else, and no word was unreadable.
+
+The level awards' requirements aren't on pp. 54–55, which are only an
+overview. They come from the tracking sheets: Sacagawea p. 304, Ida Scudder
+p. 311. Identity (Tenderheart) prints req 6 under a stray "Complete All
+continued" header. It's numbered after the Complete One items, so the
+catalog's grouping was kept.
+
+Together as a Family needed the build and the importer to key requirements by group: its catalog restarts at 1–5 in every category and lists all 30 again under "Additional". The book numbers 1–30 straight through (pp. 116–119). Badges like it get group-qualified tracker ids (`<badge>:g7.12`); every other badge keeps its `<badge>:12` ids.
+
+Still refused:
+
+| file | why |
+|---|---|
+| `canoeing-v1-3.expl` | AHGFamily has two Explorer versions; this book prints V4 (filled). V1-3 needs an older printing. |
+| `outdoor-cooking-v4.expl` | The reverse: this book prints V1-3 (filled). V4 needs a newer printing. |
 
 ## What a segment session does
 
@@ -117,10 +140,9 @@ After the last segment (or after any segment, to get partial results live):
 `npm run build:badges` → copy `data/badges/` to the Pi → Admin
 "Re-import" (the flow in `docs/HANDOFF.md`).
 
-Pilot page fix: the pilots record a single page per level
-(Tenderheart = even, Explorer = odd). That's right only when the Tenderheart
-boxes don't spill onto the odd page. Re-check each pilot's `handbook.pages`
-against the spread while doing its segment.
+Pilot page check: the pilots record a single page per level
+(Tenderheart = even, Explorer = odd). Each was re-checked against its
+spread during its segment, and all were correct.
 
 ## Out of scope (for now)
 

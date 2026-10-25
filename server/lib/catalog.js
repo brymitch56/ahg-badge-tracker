@@ -36,6 +36,18 @@ function validateBadge(b) {
   return errs;
 }
 
+/**
+ * Badge → (groupIndex, requirement) → local id suffix. "3a" as always; a badge
+ * whose catalog restarts numbering in each group (Together as a Family) gets
+ * "g2.3a" for every requirement, so ids stay unique without renaming any
+ * badge that never repeats a number.
+ */
+function requirementSuffixer(b) {
+  const keys = b.groups.flatMap((g) => g.requirements.map((r) => `${r.number}${r.letter || ''}`));
+  const repeats = new Set(keys).size !== keys.length;
+  return (gi, r) => `${repeats ? `g${gi + 1}.` : ''}${r.number}${r.letter || ''}`;
+}
+
 /** Import a list of built badges. Returns a summary; throws on validation errors. */
 function importBadges(db, badges, { actor = 'system', notes = null, sourceGeneratedAt = null } = {}) {
   const errors = [];
@@ -69,11 +81,12 @@ function importBadges(db, badges, { actor = 'system', notes = null, sourceGenera
       const fc = b.faithConnection || {};
       const hb = b.handbook || {};
       upBadge.run({ id: b.id, v: version, award: b.awardId, name: b.name, lg: b.levelGroup, frontier: b.frontier || null, levels: j(b.levels || []), classic: b.classic ? 1 : 0, pages: j(hb.pages || []), images: j(hb.images || []), intro: b.intro || null, hist: b.ahgHistory || null, ftext: fc.text || null, fref: fc.reference || null, faith: b.faith === 'award' || b.faith === 'badge' ? b.faith : null, textSource: b.textSource || null, json: JSON.stringify(b) });
+      const suffix = requirementSuffixer(b);
       b.groups.forEach((g, gi) => {
         const gid = `${b.id}:${gi + 1}`;
         upGroup.run(gid, b.id, gi + 1, g.label || null, g.rule ? g.rule.type : null, g.rule && g.rule.type === 'n_of' ? g.rule.n : null);
         for (const r of g.requirements) {
-          const rid = `${b.id}:${r.number}${r.letter || ''}`;
+          const rid = `${b.id}:${suffix(gi, r)}`;
           // same AHGFamily id under a different local id ⇒ renumbered; keep history by renaming
           const prev = findByAhg.get(r.ahgFamilyId);
           if (prev && prev.id !== rid) { renameReq.run(rid, prev.id); renumbered++; }
@@ -136,9 +149,10 @@ function getBadge(db, id) {
   if (!row) return null;
   const b = JSON.parse(row.json);
   // attach the tracker's own requirement ids so the UI can reference them
+  const suffix = requirementSuffixer(b);
   for (const [gi, g] of b.groups.entries()) {
     g.trackerGroupId = `${id}:${gi + 1}`;
-    for (const r of g.requirements) r.trackerId = `${id}:${r.number}${r.letter || ''}`;
+    for (const r of g.requirements) r.trackerId = `${id}:${suffix(gi, r)}`;
   }
   return { ...b, active: !!row.active, catalogVersion: row.catalog_version_id };
 }

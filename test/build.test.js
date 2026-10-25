@@ -52,3 +52,30 @@ test('lettered leaves are matched by number+letter', () => {
   assert.equal(r.errors, undefined, JSON.stringify(r.errors));
   assert.deepEqual(r.badge.groups[0].requirements.map((q) => `${q.number}${q.letter || ''}:${q.ahgFamilyId}`), ['1:r00000test01', '2a:r00000test02', '2b:r00000test03']);
 });
+
+// A catalog that restarts numbering in every group (as AHGFamily's Together
+// as a Family does): same numbers in two groups, then all of them again.
+const repeatingCatalog = () => ({
+  ...catalog(),
+  groups: [
+    { label: 'Play (Choose One)', rule: { type: 'n_of', n: 1 }, edition: 'current', plannable: true, items: [{ id: 'r00000rep001', number: 1, title: 'Play one' }, { id: 'r00000rep002', number: 2, title: 'Play two' }] },
+    { label: 'Serve (Choose One)', rule: { type: 'n_of', n: 1 }, edition: 'current', plannable: true, items: [{ id: 'r00000rep003', number: 1, title: 'Serve one' }, { id: 'r00000rep004', number: 2, title: 'Serve two' }] },
+    { label: 'Additional (Choose One)', rule: { type: 'n_of', n: 1 }, edition: 'current', plannable: true, items: [1, 2, 3, 4].map((n) => ({ id: `r00000rep10${n}`, number: n, title: `Any ${n}` })) },
+  ],
+});
+const repeatingAnnotation = (groups) => ({ ...example, groups: groups.map((nums, gi) => ({ label: `g${gi}`, rule: null, requirements: nums.map((n) => ({ number: n, text: `text ${gi}.${n}` })) })) });
+
+test('numbers repeated across groups are matched within their own group', () => {
+  const r = buildBadge(repeatingAnnotation([[1, 2], [1, 2], [1, 2, 3, 4]]), repeatingCatalog());
+  assert.equal(r.errors, undefined, JSON.stringify(r.errors));
+  assert.deepEqual(r.badge.groups.map((g) => g.requirements.map((q) => q.ahgFamilyId)),
+    [['r00000rep001', 'r00000rep002'], ['r00000rep003', 'r00000rep004'], ['r00000rep101', 'r00000rep102', 'r00000rep103', 'r00000rep104']]);
+  assert.equal(r.badge.requirementCount, 8);
+});
+
+test('repeated numbers: a missing or extra requirement names its group', () => {
+  const r = buildBadge(repeatingAnnotation([[1, 2], [1], [1, 2, 3, 4]]), repeatingCatalog());
+  assert.ok(r.errors.some((e) => /requirement 2 \(group 2\) .* not annotated/.test(e)), r.errors.join('|'));
+  const r2 = buildBadge(repeatingAnnotation([[1, 2], [1, 2], [1, 2, 3, 4, 5]]), repeatingCatalog());
+  assert.ok(r2.errors.some((e) => /requirement 5 \(group 3\): not in catalog/.test(e)), r2.errors.join('|'));
+});
