@@ -101,7 +101,7 @@ unfilled scaffold shows up as refused for "empty text".
 
 ## Results (Oct 24, 2026)
 
-All 12 segments ran. `build-badges --check`: 196 built, 4 refused. Pages
+All 12 segments ran. `build-badges --check`: 198 built, 2 refused. Pages
 and catalog matched everywhere else, and no word was unreadable.
 
 The level awards' requirements aren't on pp. 54–55, which are only an
@@ -110,11 +110,12 @@ p. 311. Identity (Tenderheart) prints req 6 under a stray "Complete All
 continued" header. It's numbered after the Complete One items, so the
 catalog's grouping was kept.
 
+Together as a Family needed the build and the importer to key requirements by group: its catalog restarts at 1–5 in every category and lists all 30 again under "Additional". The book numbers 1–30 straight through (pp. 116–119). Badges like it get group-qualified tracker ids (`<badge>:g7.12`); every other badge keeps its `<badge>:12` ids.
+
 Still refused:
 
 | file | why |
 |---|---|
-| `together-as-a-family.tend/.expl` | The catalog numbers 1–5 in each of six category groups, then 1–30 again in "Additional activity". `build-badges.js` keys requirements by number alone, so the repeats collide ("annotation group 1, catalog group 7") and no annotation can satisfy it. It needs the build (and the scaffold/annotation format) to key by group as well as number. Printed pages are 116–119; the book numbers 1–30 straight through. |
 | `canoeing-v1-3.expl` | AHGFamily has two Explorer versions; this book prints V4 (filled). V1-3 needs an older printing. |
 | `outdoor-cooking-v4.expl` | The reverse: this book prints V1-3 (filled). V4 needs a newer printing. |
 

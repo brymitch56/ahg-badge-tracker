@@ -92,7 +92,13 @@ function buildBadge(ann, award, { fetchedAt = null, annotationFile = null } = {}
   const cgroups = (award.groups || []).filter((g) => g.plannable !== false);
   if (cgroups.length !== ann.groups.length) e(`group count: annotation ${ann.groups.length}, catalog ${cgroups.length} [${cgroups.map((g) => g.label).join(' | ')}]`);
   const creqs = catalogRequirements({ groups: cgroups });
+  // A few catalogs restart numbering in every group (Together as a Family),
+  // so match within the annotation's own group first; the number-only map
+  // is the fallback that reports a requirement placed in the wrong group.
+  const byGroupKey = new Map(creqs.map((r) => [`${r.groupIndex}|${r.key}`, r]));
   const byKey = new Map(creqs.map((r) => [r.key, r]));
+  const repeats = creqs.length !== byKey.size;
+  const label = (gi, key) => (repeats ? `${key} (group ${gi + 1})` : key);
   const seen = new Set();
   const groups = [];
   ann.groups.forEach((ag, gi) => {
@@ -105,12 +111,13 @@ function buildBadge(ann, award, { fetchedAt = null, annotationFile = null } = {}
     const requirements = [];
     for (const ar of ag.requirements || []) {
       const key = String(ar.number) + (ar.letter || '');
-      const cr = byKey.get(key);
-      if (!cr) { e(`requirement ${key}: not in catalog`); continue; }
+      const cr = byGroupKey.get(`${gi}|${key}`) || byKey.get(key);
+      if (!cr) { e(`requirement ${label(gi, key)}: not in catalog`); continue; }
       if (cr.groupIndex !== gi) e(`requirement ${key}: annotation group ${gi + 1}, catalog group ${cr.groupIndex + 1}`);
-      if (seen.has(key)) e(`requirement ${key}: duplicated in annotation`);
-      seen.add(key);
-      if (!ar.text || !String(ar.text).trim()) e(`requirement ${key}: empty text`);
+      const seenKey = `${cr.groupIndex}|${key}`;
+      if (seen.has(seenKey)) e(`requirement ${label(gi, key)}: duplicated in annotation`);
+      seen.add(seenKey);
+      if (!ar.text || !String(ar.text).trim()) e(`requirement ${label(gi, key)}: empty text`);
       requirements.push({
         number: ar.number, ...(ar.letter ? { letter: ar.letter } : {}),
         ahgFamilyId: cr.id, title: cr.title, text: ar.text,
@@ -119,7 +126,7 @@ function buildBadge(ann, award, { fetchedAt = null, annotationFile = null } = {}
     }
     groups.push({ label: cg ? cg.label : ag.label, rule: (cg && cg.rule) || ag.rule || null, requirements });
   });
-  for (const cr of creqs) if (!seen.has(cr.key)) e(`requirement ${cr.key} ("${cr.title}", ${cr.id}): in catalog but not annotated`);
+  for (const cr of creqs) if (!seen.has(`${cr.groupIndex}|${cr.key}`)) e(`requirement ${label(cr.groupIndex, cr.key)} ("${cr.title}", ${cr.id}): in catalog but not annotated`);
   if (errors.length) return { errors };
   return {
     badge: {

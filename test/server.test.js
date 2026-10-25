@@ -163,3 +163,20 @@ test('catalog import refuses a malformed badge file', async () => {
   assert.ok(j.errors.some((e) => /bad.json: missing awardId/.test(e)), j.errors.join('|'));
   fs.rmSync(path.join(badgesDir, 'bad.json'));
 });
+
+test('catalog import: numbers repeated across groups get group-qualified ids; unique numbers keep plain ids', () => {
+  const { importBadges, getBadge } = require('../server/lib/catalog');
+  const mdb = openDb(':memory:');
+  migrate(mdb);
+  const req = (number, id) => ({ number, ahgFamilyId: id, title: 't', text: 't', subItems: [], flags: [] });
+  const repeating = { id: 'repeat-badge-tend', awardId: 'aw0000repeat', name: 'Repeat', levelGroup: 'Tenderheart', groups: [
+    { label: 'A', rule: { type: 'n_of', n: 1 }, requirements: [req(1, 'r00000rep001'), req(2, 'r00000rep002')] },
+    { label: 'B', rule: { type: 'n_of', n: 1 }, requirements: [req(1, 'r00000rep003'), req(2, 'r00000rep004')] },
+  ] };
+  const plain = exampleBuilt();
+  importBadges(mdb, [{ file: 'repeat.json', badge: repeating }, { file: 'plain.json', badge: plain }]);
+  assert.deepEqual(mdb.prepare("SELECT id FROM requirements WHERE badge_id = 'repeat-badge-tend' ORDER BY id").all().map((r) => r.id),
+    ['repeat-badge-tend:g1.1', 'repeat-badge-tend:g1.2', 'repeat-badge-tend:g2.1', 'repeat-badge-tend:g2.2']);
+  assert.ok(mdb.prepare("SELECT id FROM requirements WHERE id = 'example-badge-pipa:3'").get(), 'unique numbers keep number-only ids');
+  assert.deepEqual(getBadge(mdb, 'repeat-badge-tend').groups[1].requirements.map((r) => r.trackerId), ['repeat-badge-tend:g2.1', 'repeat-badge-tend:g2.2']);
+});
