@@ -18,7 +18,11 @@
  * the Faith tab (track 'faith', migration 011). Each PUT replaces only its
  * own track's items and notes — the faith track also carries standalone
  * Bible studies (plan_studies) — and the row goes only when both are empty.
+ *
+ * Each track also carries links per badge (migration 012, lib/links.js);
+ * saving a plan files them in the badge's link library.
  */
+const links = require('./links');
 
 // The units that plan badgework. Pathfinders do no badge work, and the
 // catalog's own grouping ("All", "Pioneer", "Patriot") maps onto the three
@@ -73,6 +77,7 @@ const planOut = (db, p, track = 'badges') => {
       position: i.position,
       notes: i.notes,
     })),
+    links: links.planLinks(db, p.id, track),
   };
   if (track === 'faith') {
     out.studies = studyRows(db, p.id).map((s) => ({
@@ -148,8 +153,8 @@ const cleanText = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
 
 /**
  * Replace one event's plan for one level group on one track. body =
- * { notes?, items: [{ requirementId, role, notes? }] } — order is the
- * position. The faith track's items may instead be standalone studies,
+ * { notes?, items: [{ requirementId, role, notes? }], links? } — order is the
+ * position; links are lib/links.js's { badgeId, url, title?, kind? }. The faith track's items may instead be standalone studies,
  * { studyId, lesson?, notes? }, and only faith-tagged badges (the Faith
  * Award and faith badges) are plannable there. The other track's items and
  * notes are never touched; a requirement already on the other track of the
@@ -192,7 +197,7 @@ function putPlan(db, event, levelGroup, body, actor, { track = 'badges' } = {}) 
     if (!ROLES.includes(it.role)) throw new PlanError(400, `${where}: role must be ${ROLES.join('|')}`);
     if (seen.has(it.requirementId)) throw new PlanError(400, `${where}: ${it.requirementId} appears twice`);
     seen.add(it.requirementId);
-    const r = db.prepare(`SELECT r.id, r.active, r.flags, b.active AS badge_active, b.level_group, b.faith FROM requirements r
+    const r = db.prepare(`SELECT r.id, r.active, r.flags, r.badge_id, b.active AS badge_active, b.level_group, b.faith FROM requirements r
                           JOIN badges b ON b.id = r.badge_id WHERE r.id = ?`).get(it.requirementId);
     if (!r) throw new PlanError(400, `${where}: unknown requirement ${it.requirementId}`);
     if (!r.active || !r.badge_active) throw new PlanError(400, `${where}: ${it.requirementId} is no longer in the catalog`);
@@ -207,9 +212,18 @@ function putPlan(db, event, levelGroup, body, actor, { track = 'badges' } = {}) 
     // a study AHGFamily has retired is never newly planned (one already on
     // this plan may stay, so an old plan still saves)
     if (JSON.parse(r.flags || '[]').includes('retired') && !there) throw new PlanError(400, `${where}: ${it.requirementId} is retired on AHGFamily`);
-    resolved.push({ requirementId: it.requirementId, role: it.role, notes: cleanText(it.notes), position: idx });
+    resolved.push({ requirementId: it.requirementId, badgeId: r.badge_id, role: it.role, notes: cleanText(it.notes), position: idx });
   });
   if (!faith && studies.length) throw new PlanError(400, 'studies belong on the faith track');
+  // links ride on the badges this track plans; undefined = keep the saved ones
+  const badgeIds = new Set(resolved.map((x) => x.badgeId));
+  let linkList;
+  try {
+    linkList = (body || {}).links === undefined ? undefined : links.validate(db, body.links, badgeIds);
+  } catch (e) {
+    if (e instanceof links.LinkError) throw new PlanError(e.status, e.message);
+    throw e;
+  }
 
   const now = new Date().toISOString();
   const notesCol = faith ? 'faith_notes' : 'notes';
@@ -218,6 +232,7 @@ function putPlan(db, event, levelGroup, body, actor, { track = 'badges' } = {}) 
     const snapshot = (p) => (p ? {
       notes: faith ? p.faith_notes : p.notes,
       items: itemRows(db, p.id, track).map((i) => ({ requirementId: i.requirement_id, role: i.role })),
+      links: links.planLinks(db, p.id, track).map((l) => l.url),
       ...(faith ? { studies: studyRows(db, p.id).map((x) => ({ studyId: x.study_id, lesson: x.lesson })) } : {}),
     } : null);
     const before = snapshot(plan);
@@ -242,6 +257,7 @@ function putPlan(db, event, levelGroup, body, actor, { track = 'badges' } = {}) 
           .run(plan.id, it.requirementId, it.role, it.position, it.notes, track);
       }
     }
+    links.replacePlanLinks(db, plan.id, track, linkList, badgeIds, actor, now);
     if (faith) {
       db.prepare(`DELETE FROM plan_studies WHERE plan_id = ? AND study_id NOT IN (${studies.map(() => '?').join(',') || 'NULL'})`)
         .run(plan.id, ...studies.map((x) => x.studyId));

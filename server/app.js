@@ -13,6 +13,7 @@ const ahgtrust = require('./lib/ahgtrust');
 const girlmerge = require('./lib/girlmerge');
 const credcrypto = require('./lib/credcrypto');
 const plans = require('./lib/plans');
+const links = require('./lib/links');
 const proposals = require('./lib/proposals');
 const ahgpull = require('./lib/ahgpull');
 const servicepull = require('./lib/servicepull');
@@ -113,6 +114,21 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
       return res.json(plans.requirementPlanState(db, req.params.id, String(req.query.unit || '')));
     } catch (e) {
       if (e instanceof plans.PlanError) return res.status(e.status).json({ error: e.message });
+      throw e;
+    }
+  });
+
+  // A badge's link library: links used on its plans, offered to the planner
+  // as suggestions. Hiding one only drops it from the suggestions.
+  api.get('/badges/:id/links', leader, (req, res) => {
+    if (!catalog.getBadge(db, req.params.id)) return res.status(404).json({ error: 'not found' });
+    return res.json(links.badgeLibrary(db, req.params.id, { all: req.query.all === '1' }));
+  });
+  api.post('/badges/:id/links/:linkId/hidden', leader, (req, res) => {
+    try {
+      return res.json(links.setHidden(db, req.params.id, Number(req.params.linkId), (req.body || {}).hidden !== false, req.user.email));
+    } catch (e) {
+      if (e instanceof links.LinkError) return res.status(e.status).json({ error: e.message });
       throw e;
     }
   });
