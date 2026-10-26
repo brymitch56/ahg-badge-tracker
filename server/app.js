@@ -118,20 +118,26 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
     }
   });
 
-  // A badge's link library: links used on its plans, offered to the planner
-  // as suggestions. Hiding one only drops it from the suggestions.
-  api.get('/badges/:id/links', leader, (req, res) => {
-    if (!catalog.getBadge(db, req.params.id)) return res.status(404).json({ error: 'not found' });
-    return res.json(links.badgeLibrary(db, req.params.id, { all: req.query.all === '1' }));
-  });
-  api.post('/badges/:id/links/:linkId/hidden', leader, (req, res) => {
-    try {
-      return res.json(links.setHidden(db, req.params.id, Number(req.params.linkId), (req.body || {}).hidden !== false, req.user.email));
-    } catch (e) {
-      if (e instanceof links.LinkError) return res.status(e.status).json({ error: e.message });
-      throw e;
-    }
-  });
+  // Link libraries — a badge's, or a Bible study's: links used on their
+  // plans, offered to the planners as suggestions. Hiding one only drops it
+  // from the suggestions.
+  const linkRoutes = (base, ownerOf, exists) => {
+    api.get(`${base}/links`, leader, (req, res) => {
+      if (!exists(req.params.id)) return res.status(404).json({ error: 'not found' });
+      return res.json(links.library(db, ownerOf(req.params.id), { all: req.query.all === '1' }));
+    });
+    api.post(`${base}/links/:linkId/hidden`, leader, (req, res) => {
+      try {
+        return res.json(links.setHidden(db, ownerOf(req.params.id), Number(req.params.linkId), (req.body || {}).hidden !== false, req.user.email));
+      } catch (e) {
+        if (e instanceof links.LinkError) return res.status(e.status).json({ error: e.message });
+        throw e;
+      }
+    });
+  };
+  linkRoutes('/badges/:id', (id) => ({ badgeId: id }), (id) => !!catalog.getBadge(db, id));
+  linkRoutes('/faith/studies/:id', (id) => ({ studyId: Number(id) }),
+    (id) => !!db.prepare('SELECT 1 FROM faith_studies WHERE id = ?').get(Number(id)));
 
   // -------------------------------------------- roster & events (mirror) --
   const girlOut = (g) => ({

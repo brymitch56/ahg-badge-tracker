@@ -157,3 +157,48 @@ test('hiding a link drops it from suggestions; using it again brings it back wit
   assert.equal((await get('/api/v1/badges/no-such-badge/links', t)).status, 404);
   assert.equal((await get('/api/v1/badges/example-badge-pipa/links')).status, 401);
 });
+
+test('faith plans: links per Bible study, with the study\'s own library; a study leaving the plan drops its links', async () => {
+  const t = await leaderToken();
+  const post = (p, body) => get(p, t, { method: 'POST', body: JSON.stringify(body) });
+  const study = await (await post('/api/v1/faith/studies', { title: 'Psalms Study', units: [] })).json();
+  const other = await (await post('/api/v1/faith/studies', { title: 'Proverbs Study', units: [] })).json();
+  const faithPath = `/api/v1/events/${eventId}/faith-plans/${lg}`;
+
+  let r = await put(faithPath, t, {
+    items: [{ studyId: study.id, lesson: 'Lesson 1' }],
+    links: [{ studyId: study.id, url: 'https://example.com/psalm-23-coloring', title: 'Psalm 23 coloring page' }],
+  });
+  assert.equal(r.status, 200);
+  const plan = await r.json();
+  assert.deepEqual(plan.links.map((l) => [l.studyId, l.title]), [[study.id, 'Psalm 23 coloring page']]);
+  assert.equal(plan.links[0].badgeId, undefined);
+
+  // a study not on the plan, both owners, or neither: refused
+  for (const [links, re] of [
+    [[{ studyId: other.id, url: 'https://example.com/x' }], /is not on this plan/],
+    [[{ studyId: study.id, badgeId: 'example-badge-pipa', url: 'https://example.com/x' }], /exactly one of badgeId or studyId/],
+    [[{ url: 'https://example.com/x' }], /exactly one of badgeId or studyId/],
+  ]) {
+    r = await put(faithPath, t, { items: [{ studyId: study.id }], links });
+    assert.equal(r.status, 400);
+    assert.match((await r.json()).error, re);
+  }
+
+  const lib = await (await get(`/api/v1/faith/studies/${study.id}/links`, t)).json();
+  assert.equal(lib.length, 1);
+  assert.equal(lib[0].uses[0].track, 'faith');
+  // the same URL for a badge is a separate library entry
+  assert.ok(!(await (await get('/api/v1/badges/example-badge-pipa/links', t)).json()).some((l) => l.url === lib[0].url));
+
+  // swapping the study out without sending links drops the old study's link from the plan
+  r = await put(faithPath, t, { items: [{ studyId: other.id }] });
+  assert.deepEqual((await r.json()).links, []);
+  assert.equal((await (await get(`/api/v1/faith/studies/${study.id}/links`, t)).json()).length, 1, 'still in the library');
+
+  r = await get(`/api/v1/faith/studies/${study.id}/links/${lib[0].id}/hidden`, t, { method: 'POST', body: JSON.stringify({ hidden: true }) });
+  assert.equal(r.status, 200);
+  assert.deepEqual(await (await get(`/api/v1/faith/studies/${study.id}/links`, t)).json(), []);
+  assert.equal((await get(`/api/v1/faith/studies/${other.id}/links/${lib[0].id}/hidden`, t, { method: 'POST', body: '{}' })).status, 404, 'link of another study');
+  assert.equal((await get('/api/v1/faith/studies/99999/links', t)).status, 404);
+});
