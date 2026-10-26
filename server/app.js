@@ -13,6 +13,7 @@ const ahgtrust = require('./lib/ahgtrust');
 const girlmerge = require('./lib/girlmerge');
 const credcrypto = require('./lib/credcrypto');
 const plans = require('./lib/plans');
+const links = require('./lib/links');
 const proposals = require('./lib/proposals');
 const ahgpull = require('./lib/ahgpull');
 const servicepull = require('./lib/servicepull');
@@ -116,6 +117,27 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
       throw e;
     }
   });
+
+  // Link libraries — a badge's, or a Bible study's: links used on their
+  // plans, offered to the planners as suggestions. Hiding one only drops it
+  // from the suggestions.
+  const linkRoutes = (base, ownerOf, exists) => {
+    api.get(`${base}/links`, leader, (req, res) => {
+      if (!exists(req.params.id)) return res.status(404).json({ error: 'not found' });
+      return res.json(links.library(db, ownerOf(req.params.id), { all: req.query.all === '1' }));
+    });
+    api.post(`${base}/links/:linkId/hidden`, leader, (req, res) => {
+      try {
+        return res.json(links.setHidden(db, ownerOf(req.params.id), Number(req.params.linkId), (req.body || {}).hidden !== false, req.user.email));
+      } catch (e) {
+        if (e instanceof links.LinkError) return res.status(e.status).json({ error: e.message });
+        throw e;
+      }
+    });
+  };
+  linkRoutes('/badges/:id', (id) => ({ badgeId: id }), (id) => !!catalog.getBadge(db, id));
+  linkRoutes('/faith/studies/:id', (id) => ({ studyId: Number(id) }),
+    (id) => !!db.prepare('SELECT 1 FROM faith_studies WHERE id = ?').get(Number(id)));
 
   // -------------------------------------------- roster & events (mirror) --
   const girlOut = (g) => ({
