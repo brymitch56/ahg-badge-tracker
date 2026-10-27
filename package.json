@@ -1,6 +1,6 @@
 {
   "name": "ahg-badge-tracker",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "description": "Leaders-only badge requirement tracker for an American Heritage Girls troop — AHGFamily catalog fetch tooling (phase 1).",
   "license": "MIT",
@@ -24,9 +24,9 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.4.1",
-    "express": "^5.2.1",
-    "jose": "^6.2.12",
-    "nodemailer": "^10.0.9"
+    "express": "^5.3.0",
+    "jose": "^6.2.13",
+    "nodemailer": "^10.2.1"
   },
   "devDependencies": {
     "pdf-lib": "^1.17.1"
