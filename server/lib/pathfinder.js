@@ -18,8 +18,11 @@
  * Beads follow the tracker's rule 2: attendance only PROPOSES (a meeting
  * she was checked in to → attendance bead; a service-project meeting →
  * service star; the meeting that finishes a stone → its logo bead) and a
- * leader confirms. Memory verses are not planned — a leader marks a verse
- * learned, which is a confirmed bead at once. Every confirmed bead queues
+ * leader confirms. Memory verses may be planned too: a meeting that covers a
+ * verse proposes its heart for every Pathfinder there (the troop gives the
+ * heart for being there when the verse is taught, not for reciting it). A
+ * leader can still mark a verse learned by hand, which is a confirmed bead
+ * at once. Every confirmed bead queues
  * one push row: AHGFamily keeps a single instance per bead award, so the
  * push appends one line per bead to that instance's comment
  * (servicepush.pushBeadNotes).
@@ -153,6 +156,7 @@ function planOut(db, p) {
     kind: p.kind,
     serviceProject: p.service_project,
     finishesStones: JSON.parse(p.finishes_stones || '[]'),
+    verses: JSON.parse(p.verses || '[]'),
     notes: p.notes,
     createdBy: p.created_by, createdAt: p.created_at, updatedBy: p.updated_by, updatedAt: p.updated_at,
     parts: partRows(db, p.id).map((x) => ({
@@ -177,10 +181,34 @@ function listPlans(db, { from, to }) {
 /** Event ids with a Pathfinder plan (the events list's pill). */
 const plannedEventIds = (db) => new Set(db.prepare('SELECT event_id FROM pf_plans').all().map((r) => r.event_id));
 
+/** A plan's memory verses → [{ stone, verse }], one per reference. */
+function planVerses(list) {
+  if (list === undefined || list === null) return [];
+  if (!Array.isArray(list)) throw new PathfinderError(400, 'verses must be [{ stone } | { verse }, …]');
+  const out = [];
+  list.forEach((v, i) => {
+    let entry;
+    if (v && v.stone != null) {
+      const s = stoneOf(v.stone);
+      if (!s) throw new PathfinderError(400, `verses[${i}]: stone must be 1–6`);
+      entry = { stone: s.number, verse: s.verse };
+    } else {
+      const verse = clean(v && v.verse);
+      if (!verse) throw new PathfinderError(400, `verses[${i}]: give a stone or a verse reference`);
+      const s = pfConfig().stones.find((x) => x.verse === verse);
+      entry = { stone: s ? s.number : null, verse };
+    }
+    if (!out.some((o) => o.verse === entry.verse)) out.push(entry);
+  });
+  return out;
+}
+
 /**
  * Replace one event's Pathfinder plan. body = { kind?, serviceProject?,
- * finishesStones?: [1–6], notes?, parts: [{ slot, stone?, requirementId?,
- * what?, supplies?, who? }] } — order is the position. A plan with nothing
+ * finishesStones?: [1–6], verses?: [{ stone } | { verse }], notes?,
+ * parts: [{ slot, stone?, requirementId?, what?, supplies?, who? }] } —
+ * order is the position. A verse with `stone` is that stone's verse;
+ * without, `verse` is a bonus verse's reference. A plan with nothing
  * in it is deleted. Returns the stored plan, or { deleted: true }.
  */
 function putPlan(db, event, body, actor) {
@@ -191,6 +219,7 @@ function putPlan(db, event, body, actor) {
   const finishes = b.finishesStones === undefined ? [] : b.finishesStones;
   if (!Array.isArray(finishes) || finishes.some((n) => !stoneOf(n))) throw new PathfinderError(400, 'finishesStones must be stepping stone numbers 1–6');
   const finishesStones = [...new Set(finishes.map(Number))].sort();
+  const verses = planVerses(b.verses);
   const allowed = plannableRequirementIds(db);
   const parts = b.parts.map((p, i) => {
     const where = `parts[${i}]`;
@@ -201,7 +230,7 @@ function putPlan(db, event, body, actor) {
   });
   const notes = clean(b.notes);
   const serviceProject = kind === 'service' ? clean(b.serviceProject) : null;
-  const empty = !parts.length && !notes && kind === 'meeting' && !finishesStones.length;
+  const empty = !parts.length && !notes && kind === 'meeting' && !finishesStones.length && !verses.length;
 
   const run = db.transaction(() => {
     const current = db.prepare('SELECT * FROM pf_plans WHERE event_id = ?').get(event.id);
@@ -215,13 +244,13 @@ function putPlan(db, event, body, actor) {
     }
     let id;
     if (current) {
-      db.prepare('UPDATE pf_plans SET kind = ?, service_project = ?, finishes_stones = ?, notes = ?, updated_by = ?, updated_at = ? WHERE id = ?')
-        .run(kind, serviceProject, JSON.stringify(finishesStones), notes, actor, now(), current.id);
+      db.prepare('UPDATE pf_plans SET kind = ?, service_project = ?, finishes_stones = ?, verses = ?, notes = ?, updated_by = ?, updated_at = ? WHERE id = ?')
+        .run(kind, serviceProject, JSON.stringify(finishesStones), JSON.stringify(verses), notes, actor, now(), current.id);
       id = current.id;
       db.prepare('DELETE FROM pf_plan_parts WHERE plan_id = ?').run(id);
     } else {
-      id = Number(db.prepare('INSERT INTO pf_plans (event_id, kind, service_project, finishes_stones, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(event.id, kind, serviceProject, JSON.stringify(finishesStones), notes, actor, now()).lastInsertRowid);
+      id = Number(db.prepare('INSERT INTO pf_plans (event_id, kind, service_project, finishes_stones, verses, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(event.id, kind, serviceProject, JSON.stringify(finishesStones), JSON.stringify(verses), notes, actor, now()).lastInsertRowid);
     }
     const ins = db.prepare('INSERT INTO pf_plan_parts (plan_id, position, slot, stone, requirement_id, what, supplies, who) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     for (const p of parts) ins.run(id, p.position, p.slot, p.stone, p.requirementId, p.what, p.supplies, p.who);
@@ -250,6 +279,7 @@ function proposeForEvent(db, event, tz) {
   const plan = db.prepare('SELECT * FROM pf_plans WHERE event_id = ?').get(event.id);
   const parts = plan ? partRows(db, plan.id) : [];
   const finishes = plan ? JSON.parse(plan.finishes_stones || '[]') : [];
+  const verses = plan ? JSON.parse(plan.verses || '[]') : [];
   const wantAttendance = !!plan || attendanceSource(db) === 'all';
   const wantService = !!plan && plan.kind === 'service';
   const reqIds = [...new Set(parts.map((p) => p.requirement_id).filter(Boolean))];
@@ -257,8 +287,8 @@ function proposeForEvent(db, event, tz) {
   const run = db.transaction(() => {
     const addBead = (g, kind, extra = {}) => {
       const r = db.prepare(`INSERT OR IGNORE INTO pf_beads (girl_id, kind, earned_on, event_id, stone, verse, label, status, source, proposed_at)
-                            VALUES (?, ?, ?, ?, ?, NULL, ?, 'proposed', 'attendance', ?)`)
-        .run(g.id, kind, date, event.id, extra.stone || null, extra.label || null, now());
+                            VALUES (?, ?, ?, ?, ?, ?, ?, 'proposed', 'attendance', ?)`)
+        .run(g.id, kind, date, event.id, extra.stone || null, extra.verse || null, extra.label || null, now());
       summary.beads += r.changes;
     };
     for (const g of pathfinders(db)) {
@@ -270,6 +300,11 @@ function proposeForEvent(db, event, tz) {
       for (const n of finishes) {
         if (db.prepare("SELECT 1 FROM pf_beads WHERE girl_id = ? AND kind = 'stone' AND stone = ? AND (status <> 'rejected' OR event_id = ?)").get(g.id, n, event.id)) continue;
         addBead(g, 'stone', { stone: n, label: event.title });
+      }
+      // a verse covered at the meeting earns its heart once, wherever it was first covered
+      for (const v of verses) {
+        if (db.prepare("SELECT 1 FROM pf_beads WHERE girl_id = ? AND kind = 'verse' AND verse = ? AND (status <> 'rejected' OR event_id = ?)").get(g.id, v.verse, event.id)) continue;
+        addBead(g, 'verse', { stone: v.stone, verse: v.verse, label: event.title });
       }
       for (const rid of reqIds) {
         if (db.prepare("SELECT 1 FROM completions WHERE girl_id = ? AND requirement_id = ? AND (status <> 'rejected' OR event_id = ?)").get(g.id, rid, event.id)) continue;
@@ -283,7 +318,8 @@ function proposeForEvent(db, event, tz) {
     // withdraw what this event no longer supports (proposed rows only)
     for (const bd of db.prepare("SELECT * FROM pf_beads WHERE event_id = ? AND status = 'proposed' AND source = 'attendance'").all(event.id)) {
       const ok = attended.has(bd.girl_id) && (
-        (bd.kind === 'attendance' && wantAttendance) || (bd.kind === 'service' && wantService) || (bd.kind === 'stone' && finishes.includes(bd.stone)));
+        (bd.kind === 'attendance' && wantAttendance) || (bd.kind === 'service' && wantService) || (bd.kind === 'stone' && finishes.includes(bd.stone))
+        || (bd.kind === 'verse' && verses.some((v) => v.verse === bd.verse)));
       if (ok) continue;
       db.prepare('DELETE FROM pf_beads WHERE id = ?').run(bd.id);
       summary.withdrawn += 1;
@@ -433,6 +469,7 @@ function addBead(db, body, actor) {
       db.prepare("DELETE FROM pf_beads WHERE girl_id = ? AND kind = ? AND event_id = ? AND status = 'proposed'").run(girl.id, b.kind, event.id);
     }
     if (b.kind === 'stone') db.prepare("DELETE FROM pf_beads WHERE girl_id = ? AND kind = 'stone' AND stone = ? AND status = 'proposed'").run(girl.id, stone);
+    if (b.kind === 'verse') db.prepare("DELETE FROM pf_beads WHERE girl_id = ? AND kind = 'verse' AND verse = ? AND status = 'proposed'").run(girl.id, verse);
     let id;
     try {
       id = Number(db.prepare(`INSERT INTO pf_beads (girl_id, kind, earned_on, event_id, stone, verse, label, status, source, proposed_at, notes)

@@ -43,7 +43,9 @@
 > finish stones) and tracker (`pf_beads`: attendance, memory-verse hearts,
 > service stars, stone logo beads). Check-in attendance PROPOSES beads and
 > planned award items (`proposals.proposeForEvent` calls the Pathfinder
-> proposer); memory verses are marked directly. Every attended event earns
+> proposer); a plan may also cover memory verses (migration 014,
+> `pf_plans.verses`) — every Pathfinder there is proposed that verse's heart,
+> once per verse — and leaders can still mark a verse by hand. Every attended event earns
 > an attendance bead (confirmed with the troop); an admin can limit it to
 > planned meetings (`pathfinder_attendance_source`: all | planned). Each confirmed bead queues a `bead` push
 > row; `servicepush.pushBeadNotes` appends one line to AHGFamily's single

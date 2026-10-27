@@ -247,6 +247,39 @@ test('memory verses: a heart per stone verse (once each) or a bonus verse by ref
   assert.equal((await call('POST', '/api/v1/pathfinder/beads', { girlId: pia, kind: 'verse', stone: 1, earnedOn: '10/01/2026' })).status, 400);
 });
 
+test('a planned verse proposes its heart for each Pathfinder there; once per verse; a hand-marked heart replaces the proposal', async () => {
+  const ev = addEvent('Pathfinder Verse Night', daysAgo(1));
+  attend(ev, pia); attend(ev, quinn); attend(ev, tess);
+  const bad = await call('PUT', `/api/v1/events/${ev}/pathfinder-plan`, { verses: [{ stone: 9 }], parts: [] });
+  assert.equal(bad.status, 400);
+  assert.equal((await call('PUT', `/api/v1/events/${ev}/pathfinder-plan`, { verses: [{}], parts: [] })).status, 400);
+  const r = await call('PUT', `/api/v1/events/${ev}/pathfinder-plan`, { verses: [{ stone: 4 }, { verse: 'Psalm 23:1' }, { verse: 'Book 4:4' }], parts: [] });
+  assert.equal(r.status, 200, 'a plan with only verses is kept');
+  assert.deepEqual(r.body.verses, [{ stone: 4, verse: 'Book 4:4' }, { stone: null, verse: 'Psalm 23:1' }], 'a stone verse given by reference is the same verse');
+  // Pia already has Psalm 23:1 (marked by hand) → only stone 4's heart
+  assert.deepEqual(beads(pia, 'verse').filter((b) => b.event_id === ev).map((b) => [b.verse, b.stone, b.status, b.source]), [['Book 4:4', 4, 'proposed', 'attendance']]);
+  assert.deepEqual(beads(quinn, 'verse').map((b) => b.verse).sort(), ['Book 4:4', 'Psalm 23:1']);
+  assert.equal(beads(tess, 'verse').length, 0, 'Pathfinders only');
+  // confirming one queues a heart line
+  const qb = beads(quinn, 'verse').find((b) => b.verse === 'Psalm 23:1');
+  await call('POST', '/api/v1/pathfinder/decide', { beads: [{ beadId: qb.id, decision: 'confirm' }] });
+  assert.match(JSON.parse(queueFor(qb.id).detail).line, /^Heart 1 of 1 to date: .*, Psalm 23:1 \(tracker\)$/);
+  // a later meeting covering the same verse proposes nothing new
+  const ev2 = addEvent('Pathfinder Review Night', daysAgo(0, 1));
+  attend(ev2, quinn);
+  await call('PUT', `/api/v1/events/${ev2}/pathfinder-plan`, { verses: [{ verse: 'Psalm 23:1' }], parts: [] });
+  assert.equal(beads(quinn, 'verse').filter((b) => b.verse === 'Psalm 23:1').length, 1);
+  // marking stone 4 by hand replaces the waiting proposal
+  const m = await call('POST', '/api/v1/pathfinder/beads', { girlId: pia, kind: 'verse', stone: 4, earnedOn: ymd(daysAgo(1)) });
+  assert.equal(m.status, 201);
+  assert.deepEqual(beads(pia, 'verse').filter((b) => b.verse === 'Book 4:4').map((b) => [b.status, b.source]), [['confirmed', 'manual']]);
+  // dropping the verse from the plan withdraws Quinn's waiting heart
+  await call('PUT', `/api/v1/events/${ev}/pathfinder-plan`, { verses: [{ verse: 'Psalm 23:1' }], parts: [] });
+  assert.equal(beads(quinn, 'verse').filter((b) => b.verse === 'Book 4:4').length, 0);
+  await call('PUT', `/api/v1/events/${ev}/pathfinder-plan`, { parts: [] });
+  await call('PUT', `/api/v1/events/${ev2}/pathfinder-plan`, { parts: [] });
+});
+
 test('six stone beads propose Fanny Crosby requirement 1, a service star proposes requirement 2; confirming them is a normal completion', async () => {
   for (const n of [1, 2, 3, 4, 5, 6]) {
     const r = await call('POST', '/api/v1/pathfinder/beads', { girlId: pia, kind: 'stone', stone: n, earnedOn: ymd(daysAgo(10 - n)) });
@@ -264,7 +297,7 @@ test('six stone beads propose Fanny Crosby requirement 1, a service star propose
   assert.equal(r.status, 200);
   const t = (await call('GET', '/api/v1/pathfinder/tracker')).body;
   const g = t.girls.find((x) => x.id === pia);
-  assert.deepEqual(g.counts, { attendance: 2, verse: 2, service: 1, stone: 6 });
+  assert.deepEqual(g.counts, { attendance: 2, verse: 3, service: 1, stone: 6 }, 'verses: stone 3 and a bonus by hand, stone 4 by hand over its planned proposal');
   assert.equal(g.fannyCrosby.done, 3);
   assert.equal(g.fannyCrosby.complete, true);
   assert.equal(g.joining.done, 0);
