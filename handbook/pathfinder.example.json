@@ -1,0 +1,15 @@
+{
+  "_source": "Shape of data/pathfinder/stones.json (gitignored — the real file is transcribed from AHG's copyrighted Pathfinder Unit Leader Guide). Invented text only here. Every field is optional; the planner shows what is present beside the stone's number and name from handbook/pathfinder.json.",
+  "stones": [
+    {
+      "number": 1,
+      "goal": "An invented one-sentence goal for the stepping stone.",
+      "objectives": ["First invented main objective", "Second invented main objective", "Third invented main objective"],
+      "supplemental": ["An invented supplemental objective"],
+      "verseText": "The memory verse's wording, as the guide prints it.",
+      "creedWords": ["Example"],
+      "frontier": "Example Frontier",
+      "levelAward": ["An invented level-award note"]
+    }
+  ]
+}

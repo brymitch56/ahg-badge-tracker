@@ -21,6 +21,7 @@ const servicepush = require('./lib/servicepush');
 const report = require('./lib/report');
 const access = require('./lib/access');
 const faith = require('./lib/faith');
+const pathfinder = require('./lib/pathfinder');
 
 let VERSION = null;
 try { VERSION = require(path.join(__dirname, '..', 'package.json')).version; } catch { /* stripped install */ }
@@ -191,12 +192,14 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
     const att = db.prepare('SELECT event_id, COUNT(*) AS total, SUM(open) AS open FROM attendance GROUP BY event_id').all();
     const badgePlans = plans.trackLevelGroups(db, 'badges');
     const faithPlans = plans.trackLevelGroups(db, 'faith');
+    const pfPlanned = pathfinder.plannedEventIds(db);
     const byEvent = new Map(att.map((a) => [a.event_id, a]));
     res.json(rows.map((e) => ({
       ...eventOut(e),
       attendance: byEvent.has(e.id) ? { total: byEvent.get(e.id).total, open: byEvent.get(e.id).open || 0 } : null,
       planLevelGroups: badgePlans.get(e.id) || [],
       faithLevelGroups: faithPlans.get(e.id) || [],
+      pathfinderPlan: pfPlanned.has(e.id),
     })));
   });
   api.get('/events/:id', leader, (req, res) => {
@@ -293,6 +296,70 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
     const p = await proposals.proposeAfterPlanChange(db, checkin, e, cfg.tz);
     return res.json({ ...out, proposals: p });
   }));
+
+  // ---------------------------------------------------------- Pathfinder --
+  // The Pathfinder page (server/lib/pathfinder.js): stepping-stone meeting
+  // plans, beads (proposed from attendance, confirmed by a leader), memory
+  // verses, and the Fanny Crosby / Joining Awards.
+  const pfErr = (res, err) => {
+    if (err instanceof pathfinder.PathfinderError) return res.status(err.status).json({ error: err.message });
+    throw err;
+  };
+  const pyStart = () => servicepull.programYearStart(new Date().toLocaleDateString('en-CA', { timeZone: cfg.tz }));
+  // A confirmed bead goes to AHGFamily straight away while the bead push is
+  // on (it still runs weekly and on Push now). Chained so two confirmations
+  // never push at once; failures are logged and the row stays for review.
+  const kickBeadPush = () => {
+    if (!servicepush.pushEnabled(db) || !servicepush.pushPathfinderEnabled(db) || mapping.getLatch(db)) return;
+    const opts = { ...(ahgSessionFactory ? { sessionFactory: ahgSessionFactory } : {}), key: credKey(), actor: 'system' };
+    app.locals.beadPushWork = Promise.resolve(app.locals.beadPushWork)
+      .then(() => servicepush.pushBeadNotes(db, cfg, opts))
+      .catch((e) => console.error(`[tracker] bead push failed: ${e.message}`));
+  };
+  api.get('/pathfinder', leader, (req, res) => res.json(pathfinder.program(db, { tz: cfg.tz, dataDir: cfg.pathfinderDir })));
+  api.post('/admin/pathfinder/settings', admin, (req, res) => {
+    try {
+      const value = pathfinder.setAttendanceSource(db, (req.body || {}).attendanceSource, req.user.email);
+      return res.json({ attendanceSource: value, rescan: pathfinder.rescan(db, cfg.tz, { from: pyStart() }) });
+    } catch (err) { return pfErr(res, err); }
+  });
+  api.post('/pathfinder/rescan', leader, (req, res) => {
+    try { return res.json(pathfinder.rescan(db, cfg.tz, { from: (req.body || {}).from || pyStart() })); } catch (err) { return pfErr(res, err); }
+  });
+  api.get('/pathfinder/plans', leader, (req, res) => {
+    try { return res.json(pathfinder.listPlans(db, { from: req.query.from, to: req.query.to })); } catch (err) { return pfErr(res, err); }
+  });
+  api.get('/events/:id/pathfinder-plan', leader, (req, res) => withEvent(req, res, (e) => res.json(pathfinder.getPlan(db, e.id))));
+  api.put('/events/:id/pathfinder-plan', leader, (req, res) => withEvent(req, res, async (e) => {
+    let out;
+    try { out = pathfinder.putPlan(db, e, req.body, req.user.email); } catch (err) { return pfErr(res, err); }
+    // a meeting that has already happened proposes at once (beads included)
+    const p = await proposals.proposeAfterPlanChange(db, checkin, e, cfg.tz);
+    return res.json({ ...out, proposals: p });
+  }));
+  api.get('/pathfinder/tracker', leader, (req, res) => res.json(pathfinder.tracker(db)));
+  api.get('/pathfinder/pending', leader, (req, res) => res.json(pathfinder.pending(db)));
+  api.post('/pathfinder/decide', leader, (req, res) => {
+    const b = req.body || {};
+    try {
+      const out = db.transaction(() => ({
+        beads: b.beads && b.beads.length ? pathfinder.decideBeads(db, b.beads, req.user.email) : [],
+        completions: b.completions && b.completions.length ? pathfinder.decideCompletions(db, b.completions, req.user.email, { tz: cfg.tz }) : [],
+      }))();
+      kickBeadPush();
+      return res.json(out);
+    } catch (err) { return pfErr(res, err); }
+  });
+  api.post('/pathfinder/beads', leader, (req, res) => {
+    try {
+      const bead = pathfinder.addBead(db, req.body, req.user.email);
+      kickBeadPush();
+      return res.status(201).json({ id: bead.id, kind: bead.kind, earnedOn: bead.earned_on, status: bead.status });
+    } catch (err) { return pfErr(res, err); }
+  });
+  api.delete('/pathfinder/beads/:id', leader, (req, res) => {
+    try { return res.json(pathfinder.removeBead(db, req.params.id, req.user.email, { alreadyFixed: req.query.alreadyFixed === '1' })); } catch (err) { return pfErr(res, err); }
+  });
 
   // -------------------------------------------------- review queue --------
   // Cross-event catch-up: everything waiting on a leader from meetings that
@@ -394,6 +461,7 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
       openConflicts: db.prepare("SELECT COUNT(*) AS n FROM conflicts WHERE status = 'open'").get().n,
       pushEnabled: servicepush.pushEnabled(db),
       pushRequirementsEnabled: servicepush.pushRequirementsEnabled(db),
+      pushPathfinderEnabled: servicepush.pushPathfinderEnabled(db),
       awaitingQueue: servicepush.unqueuedConfirmedCount(db), // confirmed completions the next pull (Push now) will queue
       reportMode: report.reportMode(db),
       mailConfigured: !!(cfg.mail && cfg.mail.smtpUrl && cfg.mail.from && cfg.mail.to.length),
@@ -436,7 +504,7 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
     res.json(rows.map((q) => ({
       id: q.id, status: q.status, action: q.action, date: q.date, girlId: q.girl_id, firstName: q.first_name, lastName: q.last_name,
       badgeId: q.badge_id, badgeName: q.badge_name, requirementId: q.requirement_id, number: q.number, letter: q.letter, title: q.title,
-      ahgAwardId: q.ahg_award_id, starProposalId: q.star_proposal_id, detail: q.detail ? JSON.parse(q.detail) : null,
+      ahgAwardId: q.ahg_award_id, starProposalId: q.star_proposal_id, pfBeadId: q.pf_bead_id, detail: q.detail ? JSON.parse(q.detail) : null,
       attempts: q.attempts, lastError: q.last_error, createdAt: q.created_at, sentAt: q.sent_at,
     })));
   });
@@ -460,9 +528,9 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
     const opts = { ...(ahgSessionFactory ? { sessionFactory: ahgSessionFactory } : {}), key: credKey(), actor: req.user.email };
     try {
       // pull first: confirmed requirement completions are queued by the pull
-      const { pull, stars, requirements } = await servicepush.pullThenPush(db, cfg, opts);
-      const sent = await report.sendPushReport(db, cfg, { stars, requirements }, { ...(mailer ? { mailer } : {}), trigger: 'manual', actor: req.user.email });
-      res.json({ ...stars, requirements, pull, report: sent });
+      const { pull, stars, requirements, beads } = await servicepush.pullThenPush(db, cfg, opts);
+      const sent = await report.sendPushReport(db, cfg, { stars, requirements, beads }, { ...(mailer ? { mailer } : {}), trigger: 'manual', actor: req.user.email });
+      res.json({ ...stars, requirements, beads, pull, report: sent });
     } catch (e) {
       if (e instanceof ahgpull.PullError) {
         try { await report.sendPushReport(db, cfg, { stars: { skipped: e.message } }, { ...(mailer ? { mailer } : {}), trigger: 'manual', actor: req.user.email }); } catch { /* report is best effort */ }
@@ -477,10 +545,11 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
     const on = setter(db, req.body && req.body.enabled === true, req.user.email);
     db.prepare('INSERT INTO audit_log (at, actor, action, entity, entity_id, before, after) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(new Date().toISOString(), req.user.email, `${key}.set`, 'settings', key, null, JSON.stringify({ enabled: on }));
-    res.json({ [key === 'push_enabled' ? 'pushEnabled' : 'pushRequirementsEnabled']: on });
+    res.json({ [{ push_enabled: 'pushEnabled', push_requirements_enabled: 'pushRequirementsEnabled', push_pathfinder_enabled: 'pushPathfinderEnabled' }[key]]: on });
   });
   flagRoute('/admin/push-enabled', servicepush.setPushEnabled, 'push_enabled');
   flagRoute('/admin/push-requirements-enabled', servicepush.setPushRequirementsEnabled, 'push_requirements_enabled');
+  flagRoute('/admin/push-pathfinder-enabled', servicepush.setPushPathfinderEnabled, 'push_pathfinder_enabled');
   api.post('/admin/report-mode', admin, (req, res) => res.json({ reportMode: report.setReportMode(db, req.body && req.body.mode, req.user.email) }));
   api.get('/sync/push-report', leader, (req, res) => res.json(report.lastPushReport(db) || null));
   api.get('/stars', leader, (req, res) => res.json(servicepull.listStars(db, { girlId: req.query.girlId ? Number(req.query.girlId) : null })));

@@ -114,6 +114,10 @@ function proposeForEvent(db, event, tz) {
     }
   });
   run();
+  // Pathfinders: beads and Fanny Crosby / Joining proposals from the same
+  // attendance (server/lib/pathfinder.js; required here so every path that
+  // proposes — webhook, sweep, plan save — reaches it)
+  require('./pathfinder').proposeForEvent(db, event, tz);
   return summary;
 }
 
