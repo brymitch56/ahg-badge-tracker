@@ -15,6 +15,8 @@ function makeConfig(env = process.env) {
     badgesDir: env.BADGES_DIR ? path.resolve(env.BADGES_DIR) : path.join(dataDir, 'badges'),
     // Faith Award study definitions (copyrighted guide content — data/, never git)
     faithStudiesDir: env.FAITH_STUDIES_DIR ? path.resolve(env.FAITH_STUDIES_DIR) : path.join(dataDir, 'faith-studies'),
+    // Pathfinder stepping-stone outlines (copyrighted guide content — data/, never git)
+    pathfinderDir: env.PATHFINDER_DIR ? path.resolve(env.PATHFINDER_DIR) : path.join(dataDir, 'pathfinder'),
     siteOrigin: (env.SITE_ORIGIN || '').replace(/\/$/, ''),
     tz: env.TZ || 'America/New_York',
     auth: {

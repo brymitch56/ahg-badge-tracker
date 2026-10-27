@@ -23,25 +23,25 @@ const setReportMode = (db, mode, actor) => { const m = mode === 'errors_only' ? 
 
 const fmtWhen = (iso, tz) => { try { return new Date(iso).toLocaleString('en-US', { timeZone: tz }); } catch { return iso; } };
 
-function buildPushReport(db, { stars = null, requirements = null, trigger = 'manual', tz = 'UTC', at = new Date().toISOString() } = {}) {
+function buildPushReport(db, { stars = null, requirements = null, beads = null, trigger = 'manual', tz = 'UTC', at = new Date().toISOString() } = {}) {
   const name = (id) => { const g = db.prepare('SELECT first_name, last_name FROM girls WHERE id = ?').get(id); return g ? `${g.last_name}, ${g.first_name}` : `girl #${id}`; };
   const latch = mapping.getLatch(db);
   const lines = [];
   const counts = { pushed: 0, held: 0, failed: 0, skippedRows: 0 };
-  for (const [label, s] of [['Service Stars', stars], ['Requirements', requirements]]) {
+  for (const [label, s] of [['Service Stars', stars], ['Requirements', requirements], ['Pathfinder beads', beads]]) {
     if (!s) continue;
     if (s.skipped) { lines.push(`${label}: not run (${s.skipped})`); continue; }
     counts.pushed += s.pushed || 0; counts.held += s.held || 0; counts.failed += s.failed || 0; counts.skippedRows += s.skippedRows || 0;
     lines.push(`${label}: ${s.queued} queued → ${s.pushed || 0} sent, ${s.held || 0} held, ${s.failed || 0} failed${s.skippedRows ? `, ${s.skippedRows} skipped` : ''}`);
     for (const it of s.items || []) {
-      const what = it.badge ? `${it.badge} ${it.label}` : `Service Star${it.level ? ` (${it.level})` : ''}`;
+      const what = it.what || (it.badge ? `${it.badge} ${it.label}` : `Service Star${it.level ? ` (${it.level})` : ''}`);
       lines.push(`  ${it.status.toUpperCase().padEnd(7)} ${name(it.girlId)} — ${what}${it.error ? ` — ${it.error}` : ''}`);
     }
     for (const w of s.warnings || []) lines.push(`  ! ${w}`);
   }
   const outstanding = db.prepare("SELECT status, COUNT(*) AS n FROM push_queue WHERE status IN ('queued', 'held') GROUP BY status").all();
   const problems = counts.held + counts.failed > 0 || !!latch;
-  const ran = (stars && !stars.skipped) || (requirements && !requirements.skipped);
+  const ran = (stars && !stars.skipped) || (requirements && !requirements.skipped) || (beads && !beads.skipped);
   const headline = !ran ? 'push did not run' : counts.pushed + counts.held + counts.failed + counts.skippedRows === 0 ? 'nothing to push'
     : `${counts.pushed} sent${counts.held ? `, ${counts.held} HELD` : ''}${counts.failed ? `, ${counts.failed} FAILED` : ''}`;
   const subject = `[badge tracker] AHGFamily push (${trigger}): ${headline}${latch ? ' — LATCHED' : ''}`;

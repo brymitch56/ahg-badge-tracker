@@ -161,3 +161,21 @@ Studies are tracker-owned badges (`faith = 'study'`): the catalog build
 never deactivates them, and they are never pulled from or pushed to
 AHGFamily.
 
+
+## Pathfinder (`handbook/pathfinder.json`, `data/pathfinder/`)
+
+Pathfinders earn no badges. The Pathfinder page plans their six stepping
+stones meeting by meeting and tracks their beads and two awards.
+
+- `handbook/pathfinder.json` (committable — program structure only): the
+  Fanny Crosby Level Award and Joining Award ids, the three repeat-bead award
+  ids (attendance, memory verse, service), and each stepping stone's number,
+  name, logo-bead award id and memory-verse *reference*. The build makes the
+  two awards from AHGFamily's short titles (catalog-only, like the Faith
+  Award) so their requirements can be planned and tracked.
+- `data/pathfinder/stones.json` (gitignored — AHG's copyrighted *Pathfinder
+  Unit Leader Guide*): each stone's goal, objectives, verse wording, creed
+  words and frontier, shown beside the planner and on printed plans. Shape:
+  `handbook/pathfinder.example.json`. The tracker reads it at request time
+  from `PATHFINDER_DIR` (default `data/pathfinder/`) — copy the folder to the
+  Pi; no import step.

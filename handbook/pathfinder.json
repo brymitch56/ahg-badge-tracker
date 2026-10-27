@@ -1,0 +1,23 @@
+{
+  "_source": "AHG program structure, not handbook prose — committable. Award ids are AHGFamily's (Pathfinders level group); stepping-stone names are the short titles AHGFamily's Fanny Crosby requirement 1 lists; verses are references only. The outlines (goal, objectives, verse wording) are transcribed from the Pathfinder Unit Leader Guide into data/pathfinder/stones.json (gitignored) — see handbook/pathfinder.example.json for its shape.",
+  "fannyCrosby": "awq57l4tn0qb",
+  "joining": "aw8ac462c3be",
+  "beads": {
+    "attendance": "aw3zbb0lwr39",
+    "verse": "awppls98rbhj",
+    "service": "aw49qrqstap2"
+  },
+  "_fannyCrosbyDerived": "Fanny Crosby requirements the tracker proposes from beads: 1 = one activity from each stepping stone (all six stone beads), 2 = at least one service project (a service star bead).",
+  "fannyCrosbyDerived": {
+    "stones": "wkn70a3dmoph",
+    "service": "r5xo92rsgy3u"
+  },
+  "stones": [
+    { "number": 1, "name": "Starting the Adventure", "beadAwardId": "awup5ro8lzfz", "verse": "1 Timothy 4:12a" },
+    { "number": 2, "name": "Love God", "beadAwardId": "awfrpkou6q43", "verse": "Deuteronomy 6:5" },
+    { "number": 3, "name": "Cherish My Family", "beadAwardId": "awq6svg0ykvd", "verse": "Luke 6:31" },
+    { "number": 4, "name": "Honor My Country", "beadAwardId": "aw1mbuaz1tej", "verse": "Romans 13:1a" },
+    { "number": 5, "name": "Serve in My Community", "beadAwardId": "aw7g7zqplp4m", "verse": "Ephesians 6:7" },
+    { "number": 6, "name": "The Next Step", "beadAwardId": "aw7y5l6ja02j", "verse": "Colossians 1:10" }
+  ]
+}

@@ -93,13 +93,14 @@ function makeScheduler({ cfg, db, client, credKey = null, ahgSessionFactory = un
         const r = await servicepush.pullThenPush(db, cfg, opts);
         out.push = r.stars;
         out.pushRequirements = r.requirements;
+        out.pushBeads = r.beads;
         if (r.pull && !r.pull.skipped) out.pushPull = r.pull;
       } catch (e) {
         log(`[tracker] weekly AHGFamily push failed: ${e.message}`);
         out.pushError = e.message;
       }
       try {
-        out.report = await report.sendPushReport(db, cfg, { stars: out.push || null, requirements: out.pushRequirements || null }, { ...(mailer ? { mailer } : {}), trigger: 'weekly', log });
+        out.report = await report.sendPushReport(db, cfg, { stars: out.push || null, requirements: out.pushRequirements || null, beads: out.pushBeads || null }, { ...(mailer ? { mailer } : {}), trigger: 'weekly', log });
       } catch (e) { log(`[tracker] push report failed: ${e.message}`); }
     }
 

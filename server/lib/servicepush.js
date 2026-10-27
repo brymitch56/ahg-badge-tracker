@@ -355,6 +355,170 @@ async function pushRequirementMarks(db, cfg, { sessionFactory = ahgpull.makeLive
   });
 }
 
+// ======================================================================
+// Pathfinder beads (the `bead` queue rows server/lib/pathfinder.js creates
+// when a leader confirms a bead). AHGFamily keeps ONE instance per bead
+// award (seen live 2026-10-27: a Pathfinder's attendance bead shows a single
+// panel, no blank slot once one is saved), so a girl's tenth blue bead is
+// not a tenth instance — it is one more line in that instance's comment:
+//   - attendance / verse / service beads are record-keyed panels
+//     (`completed_on-<ad…>`, `comment-<ad…>`): the first bead fills a blank
+//     slot (`new-<ad…>` = true) with its date; every later bead keeps the
+//     date AHGFamily already has and APPENDS its line to the comment;
+//   - a stepping stone's logo bead is award-keyed (`completed_on-<aw…>`,
+//     `comment-<aw…>`): date set if blank, line appended.
+// Never overwrites: whatever the comment held stays, ours goes on the end.
+// Same vehicle and rules as the star push — full Standard-view save, every
+// panel echoed, read-back proves it, anything else is HELD, never retried.
+// Behind its own flag on top of push_enabled: the append has not been
+// watched live yet.
+const BEAD_SETTING = 'push_pathfinder_enabled';
+const pushPathfinderEnabled = (db) => getSetting(db, BEAD_SETTING) === true;
+const setPushPathfinderEnabled = (db, on, actor) => { setSetting(db, BEAD_SETTING, !!on, actor); return !!on; };
+
+const normComment = (s) => String(s || '').replace(/\r\n?/g, '\n').trim();
+
+// Panel fields of a bead award's fragment: record-keyed (ad…) and this
+// award's own award-keyed fields, in document order.
+function beadPanelPairs(fragmentHtml, awardId, set = {}) {
+  const pairs = [];
+  const nameRe = new RegExp(`^(new|completed_on|awarded_on|purchased|comment)-(ad[a-z0-9]{10}|${awardId})$`);
+  const re = /<(input|textarea)\b([^>]*)>(?:([\s\S]*?)<\/\1\s*>)?/gi;
+  let m;
+  while ((m = re.exec(fragmentHtml))) {
+    const attrs = Object.fromEntries([...m[2].matchAll(/([a-zA-Z_:-]+)(?:="([^"]*)")?/g)].map((x) => [x[1], x[2] === undefined ? '' : A.decodeHtml(x[2])]));
+    const name = (attrs.name || '').trim();
+    if (!nameRe.test(name)) continue;
+    pairs.push([name, m[1].toLowerCase() === 'textarea' ? A.decodeHtml(m[3] || '') : (attrs.value || '')]);
+  }
+  for (const [name, value] of Object.entries(set)) {
+    const i = pairs.findIndex(([n]) => n === name);
+    if (i >= 0) pairs[i] = [name, value]; else pairs.push([name, value]);
+  }
+  return pairs;
+}
+
+/**
+ * What a bead award's fragment holds: `award` (award-keyed date + comment,
+ * when the fields exist), the saved record-keyed instances, and the blank
+ * slots. Pure; exported for tests.
+ */
+function beadState(fragmentHtml, awardId) {
+  const st = parseStandardState(fragmentHtml, { awardId });
+  const field = (name, textarea = false) => {
+    const re = textarea
+      ? new RegExp(`<textarea\\b[^>]*name="${name}"[^>]*>([\\s\\S]*?)</textarea\\s*>`, 'i')
+      : new RegExp(`<input\\b[^>]*name="${name}"[^>]*>`, 'i');
+    const m = re.exec(fragmentHtml);
+    if (!m) return undefined;
+    if (textarea) return A.decodeHtml(m[1] || '').trim();
+    const v = /\bvalue="([^"]*)"/.exec(m[0]);
+    return v ? A.decodeHtml(v[1]).trim() : '';
+  };
+  const date = field(`completed_on-${awardId}`);
+  return {
+    award: date === undefined ? null : { completedOn: date || null, comment: field(`comment-${awardId}`, true) || null },
+    saved: st.records.filter((r) => !r.isNew),
+    blanks: st.records.filter((r) => r.isNew),
+  };
+}
+
+const appendLine = (existing, line) => (normComment(existing) ? `${normComment(existing)}\n${line}` : line);
+
+async function pushBeadNotes(db, cfg, { sessionFactory = ahgpull.makeLiveSession, key = null, env = process.env, actor = 'system', limit = 50 } = {}) {
+  if (!pushEnabled(db)) return { skipped: 'push disabled', pushed: 0, held: 0, failed: 0, skippedRows: 0 };
+  if (!pushPathfinderEnabled(db)) return { skipped: 'Pathfinder bead push disabled', pushed: 0, held: 0, failed: 0, skippedRows: 0 };
+  const latch = mapping.getLatch(db);
+  if (latch) throw new PullError('latched', `AHGFamily is latched since ${latch.latchedAt} (${latch.error}) — press Connect on the Admin page (or re-enter credentials) to clear`);
+  if (!mapping.hasStoredCredentials(db, key)) throw new PullError('noconfig', 'no AHGFamily credentials — enter them via the admin screen');
+
+  const rows = db.prepare("SELECT * FROM push_queue WHERE action = 'bead' AND status = 'queued' ORDER BY girl_id, ahg_award_id, id LIMIT ?").all(limit);
+  return recordRun(db, 'push', async () => {
+    const summary = { action: 'bead', queued: rows.length, pushed: 0, held: 0, failed: 0, skippedRows: 0, items: [], warnings: [] };
+    if (!rows.length) return summary;
+    let session;
+    try {
+      session = await sessionFactory(db, { key, env });
+    } catch (e) {
+      if (e instanceof A.FetchError && e.code === A.EXIT.AUTH) {
+        mapping.setLatch(db, e.message);
+        throw new PullError('latched', `AHGFamily login failed — latched all AHGFamily traffic (${e.message})`);
+      }
+      throw e;
+    }
+    const runId = db.prepare('SELECT MAX(id) AS id FROM sync_runs').get().id;
+    const finish = (row, status, lastError, detail) => {
+      db.prepare('UPDATE push_queue SET status = ?, attempts = attempts + 1, last_error = ?, sent_at = ?, sync_run_id = ? WHERE id = ?')
+        .run(status, lastError || null, status === 'sent' ? now() : null, runId, row.id);
+      db.prepare('INSERT INTO audit_log (at, actor, action, entity, entity_id, before, after) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(now(), actor, `push.bead.${status}`, 'push_queue', String(row.id), JSON.stringify({ status: 'queued' }),
+          JSON.stringify({ status, girlId: row.girl_id, beadId: row.pf_bead_id, error: lastError || null }));
+      summary.items.push({ id: row.id, girlId: row.girl_id, what: `Pathfinder ${detail.kind || ''} bead: ${detail.line || ''}`, status, error: lastError || null });
+      summary[status === 'sent' ? 'pushed' : status === 'held' ? 'held' : status === 'skipped' ? 'skippedRows' : 'failed'] += 1;
+    };
+
+    try {
+      for (const row of rows) {
+        const detail = row.detail ? JSON.parse(row.detail) : {};
+        const girl = db.prepare('SELECT * FROM girls WHERE id = ?').get(row.girl_id);
+        const bead = row.pf_bead_id ? db.prepare('SELECT * FROM pf_beads WHERE id = ?').get(row.pf_bead_id) : null;
+        if (!girl || !girl.active || !girl.ahg_youth_id) { finish(row, 'held', 'girl is not active / not mapped to AHGFamily', detail); continue; }
+        if (!bead || bead.status !== 'confirmed') { finish(row, 'skipped', 'bead is no longer confirmed', detail); continue; }
+        const awardId = row.ahg_award_id;
+        const line = detail.line;
+        if (!awardId || !line) { finish(row, 'held', 'queue row has no AHGFamily award id or note line', detail); continue; }
+        const formDate = toFormDate(row.date, cfg.tz);
+        if (!formDate) { finish(row, 'held', `refusing to push an invalid or future date (${row.date})`, detail); continue; }
+
+        const beforeHtml = await session.standard(awardId, girl.ahg_youth_id);
+        const before = beadState(beforeHtml, awardId);
+        let set; let expect; // expect: how the target must read back
+        if (before.award) {
+          if (normComment(before.award.comment).split('\n').includes(line)) { finish(row, 'skipped', 'line already in the AHGFamily note', detail); continue; }
+          const date = before.award.completedOn || formDate;
+          const comment = appendLine(before.award.comment, line);
+          set = { [`completed_on-${awardId}`]: date, [`comment-${awardId}`]: comment };
+          expect = (after) => after.award && after.award.completedOn === date && normComment(after.award.comment) === comment
+            && JSON.stringify(savedSig({ records: after.saved })) === JSON.stringify(savedSig({ records: before.saved }));
+        } else if (before.saved.length === 1) {
+          const r = before.saved[0];
+          if (normComment(r.comment).split('\n').includes(line)) { finish(row, 'skipped', 'line already in the AHGFamily note', detail); continue; }
+          const date = r.completedOn || formDate;
+          const comment = appendLine(r.comment, line);
+          set = { [`completed_on-${r.adId}`]: date, [`comment-${r.adId}`]: comment };
+          expect = (after) => after.saved.length === 1 && after.saved[0].adId === r.adId && after.saved[0].completedOn === date
+            && normComment(after.saved[0].comment) === comment && after.saved[0].awardedOn === r.awardedOn && after.saved[0].purchased === r.purchased;
+        } else if (before.saved.length === 0 && before.blanks.length) {
+          const slot = before.blanks[0].adId;
+          set = { [`new-${slot}`]: 'true', [`completed_on-${slot}`]: formDate, [`comment-${slot}`]: line };
+          expect = (after) => after.saved.length === 1 && after.saved[0].completedOn === formDate && normComment(after.saved[0].comment) === line;
+        } else {
+          finish(row, 'held', before.saved.length > 1
+            ? `AHGFamily holds ${before.saved.length} instances of this bead — add the line by hand`
+            : 'no bead panel on the Standard form — cannot write without clobbering', detail);
+          continue;
+        }
+
+        const pageHtml = await session.page('/advancement/index?level=all&style=standard');
+        const outer = serializeForm(pageHtml).filter(([n]) => !/^(youth-select\[\]|badge-select)$/.test(n)
+          && !/^(new|completed_on|awarded_on|purchased|comment)-(ad[a-z0-9]{10}|aw[a-z0-9]{10})$/.test(n));
+        const body = [...outer, ['youth-select[]', girl.ahg_youth_id], ['badge-select', awardId], ...beadPanelPairs(beforeHtml, awardId, set)];
+
+        await session.save(body);
+        const after = beadState(await session.standard(awardId, girl.ahg_youth_id), awardId);
+        if (expect(after)) finish(row, 'sent', null, detail);
+        else {
+          finish(row, 'held', 'save not confirmed: the bead note did not read back as sent (length limit on AHGFamily?) — left for review, not retried', detail);
+          summary.warnings.push(`girl ${row.girl_id}: bead note not confirmed on read-back`);
+        }
+      }
+    } finally {
+      await session.close();
+    }
+    return summary;
+  });
+}
+
 // ------------------------------------------------------- pull, then push ---
 // Requirement completions are queued only by the AHGFamily PULL (ahgpull's
 // rule-6 reconcile: confirmed here, not ticked there → queue), because only
@@ -379,8 +543,8 @@ function unqueuedConfirmedCount(db) {
  * The push entry point (Push now and the weekly push): refresh the
  * requirement queue with a pull — ALWAYS, never "a recent pull will do": a
  * completion confirmed a minute after the last pull would be missed — then
- * push stars, then requirement marks. A latch at any step stops the rest
- * (rule 8). Returns { pull, stars, requirements }.
+ * push stars, then requirement marks, then Pathfinder bead notes. A latch
+ * at any step stops the rest (rule 8). Returns { pull, stars, requirements, beads }.
  */
 async function pullThenPush(db, cfg, opts = {}) {
   let pull = null;
@@ -388,11 +552,13 @@ async function pullThenPush(db, cfg, opts = {}) {
   if (pushRequirementsEnabled(db) && mapped) pull = await ahgpull.pullAhgState(db, cfg, opts);
   const stars = await pushStarInstances(db, cfg, opts);
   const requirements = mapping.getLatch(db) ? null : await pushRequirementMarks(db, cfg, opts);
-  return { pull, stars, requirements };
+  const beads = mapping.getLatch(db) ? null : await pushBeadNotes(db, cfg, opts);
+  return { pull, stars, requirements, beads };
 }
 
 module.exports = {
   pullThenPush, unqueuedConfirmedCount,
   pushStarInstances, pushRequirementMarks, pushEnabled, setPushEnabled, pushRequirementsEnabled, setPushRequirementsEnabled,
+  pushBeadNotes, pushPathfinderEnabled, setPushPathfinderEnabled, beadState, beadPanelPairs,
   toFormDate, serializeForm, panelPairsWithStar, fragmentPairs,
 };

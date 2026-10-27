@@ -149,6 +149,11 @@ function loadFaithConfig(file = path.join(__dirname, '..', 'handbook', 'faith.js
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
 }
 
+// handbook/pathfinder.json: the Pathfinder awards and stepping stones.
+function loadPathfinderConfig(file = path.join(__dirname, '..', 'handbook', 'pathfinder.json')) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+}
+
 /** 'award' | 'badge' | null for a catalog award under a faith config. */
 function faithTag(award, faith) {
   if (!faith || !award) return null;
@@ -273,9 +278,30 @@ function main(argv) {
       write(r.badge);
     }
   }
-  console.log(`\n${built} built, ${fromCatalog ? `${fromCatalog} faith from AHGFamily titles, ` : ''}${refused} refused${check ? ' (check only — nothing written)' : ` → ${outDir}`}`);
+  // Pathfinder: the Fanny Crosby Level Award and the Joining Award, from
+  // AHGFamily's short titles (handbook/pathfinder.json), so the Pathfinder
+  // planner can plan and track them. An annotation, if one is ever made,
+  // replaces the text under the same ids.
+  const pathfinder = noFaith ? null : loadPathfinderConfig();
+  if (pathfinder && !only) {
+    for (const id of [pathfinder.fannyCrosby, pathfinder.joining].filter(Boolean)) {
+      if (annotated.has(id)) continue;
+      const award = readAward(id);
+      const r = buildCatalogOnly(award, { fetchedAt: award && award.source ? award.source.fetchedAt || null : null });
+      if (r.errors) {
+        refused++;
+        console.log(`✗ pathfinder ${award ? award.name : id}`);
+        for (const m of r.errors) console.log(`    - ${m}`);
+        continue;
+      }
+      fromCatalog++;
+      console.log(`✓ pathfinder ${r.badge.name} → ${r.badge.id}.json  (${r.badge.requirementCount} requirements, AHGFamily titles only)`);
+      write(r.badge);
+    }
+  }
+  console.log(`\n${built} built, ${fromCatalog ? `${fromCatalog} from AHGFamily titles, ` : ''}${refused} refused${check ? ' (check only — nothing written)' : ` → ${outDir}`}`);
   process.exit(refused ? 1 : 0);
 }
 
 if (require.main === module) main(process.argv.slice(2));
-module.exports = { FRONTIERS, normalizeFrontier, frontierForName, buildBadge, catalogRequirements, loadFaithConfig, faithTag, buildCatalogOnly, faithAwardIds };
+module.exports = { FRONTIERS, normalizeFrontier, frontierForName, buildBadge, catalogRequirements, loadFaithConfig, loadPathfinderConfig, faithTag, buildCatalogOnly, faithAwardIds };

@@ -34,6 +34,25 @@
 > deploy: build + copy data/badges/ and data/faith-studies/ + Re-import +
 > Faith tab → What counts → Load study steps.
 
+> **Update — Oct 27, 2026 (v0.5.0, 196 tests): the Pathfinder page.**
+> Migration 013 + `server/lib/pathfinder.js`. Pathfinders get their own
+> planner (one plan per event, laid out like the Unit Leader Guide's meeting
+> planner: intro / activities / optional / closing with what & how, supplies,
+> who; a part may work on a stepping stone and/or a Fanny Crosby or Joining
+> Award requirement; a plan may be a whole-meeting service project and may
+> finish stones) and tracker (`pf_beads`: attendance, memory-verse hearts,
+> service stars, stone logo beads). Check-in attendance PROPOSES beads and
+> planned award items (`proposals.proposeForEvent` calls the Pathfinder
+> proposer); memory verses are marked directly. Every attended event earns
+> an attendance bead (confirmed with the troop); an admin can limit it to
+> planned meetings (`pathfinder_attendance_source`: all | planned). Each confirmed bead queues a `bead` push
+> row; `servicepush.pushBeadNotes` appends one line to AHGFamily's single
+> instance per bead (behind `push_pathfinder_enabled`, off — run
+> `docs/pathfinder-bead-push-verification.md` first). Fanny Crosby and
+> Joining build catalog-only from `handbook/pathfinder.json`; the guide's
+> outlines live in gitignored `data/pathfinder/stones.json`. To deploy:
+> build + copy `data/badges/` and `data/pathfinder/` + Re-import.
+
 Read `CLAUDE.md` first (public repo, PII rules, read-only AHGFamily rule,
 copyright rule). Then this file, then `docs/tracker-service-spec.md`
 (draft 3) and `docs/service-stars-plan.md` (draft 2, next feature).
