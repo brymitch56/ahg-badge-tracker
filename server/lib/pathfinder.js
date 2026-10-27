@@ -36,6 +36,9 @@ const CONFIG_FILE = path.join(__dirname, '..', '..', 'handbook', 'pathfinder.jso
 const KINDS = ['attendance', 'verse', 'service', 'stone'];
 const SLOTS = ['intro', 'activity', 'optional', 'closing'];
 const ATTENDANCE_SETTING = 'pathfinder_attendance_source';
+// A Pathfinder earns one attendance bead for every event she attends
+// (meetings, service days, outings). 'planned' is an admin override that
+// limits it to meetings with a Pathfinder plan.
 const ATTENDANCE_SOURCES = ['planned', 'all'];
 
 class PathfinderError extends Error {
@@ -88,7 +91,7 @@ function plannableRequirementIds(db) {
   return new Set([...awardRequirements(db, c.fannyCrosby), ...awardRequirements(db, c.joining)].map((r) => r.id));
 }
 
-const attendanceSource = (db) => (ATTENDANCE_SOURCES.includes(getSetting(db, ATTENDANCE_SETTING)) ? getSetting(db, ATTENDANCE_SETTING) : 'planned');
+const attendanceSource = (db) => (ATTENDANCE_SOURCES.includes(getSetting(db, ATTENDANCE_SETTING)) ? getSetting(db, ATTENDANCE_SETTING) : 'all');
 function setAttendanceSource(db, value, actor) {
   if (!ATTENDANCE_SOURCES.includes(value)) throw new PathfinderError(400, `attendanceSource must be ${ATTENDANCE_SOURCES.join('|')}`);
   const before = attendanceSource(db);

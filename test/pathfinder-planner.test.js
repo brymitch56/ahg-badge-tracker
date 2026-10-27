@@ -120,7 +120,7 @@ test('GET /pathfinder: stones by number and name, both awards, settings; outline
   assert.deepEqual(r.body.stones.map((s) => [s.number, s.name]), PF.stones.map((s) => [s.number, s.name]));
   assert.equal(r.body.fannyCrosby.requirements.length, 3);
   assert.equal(r.body.joining.requirements.length, 1);
-  assert.equal(r.body.attendanceSource, 'planned');
+  assert.equal(r.body.attendanceSource, 'all');
   assert.equal(r.body.outlinesLoaded, false);
   assert.equal(r.body.stones[0].goal, null);
 });
@@ -194,19 +194,19 @@ test('a service-project meeting proposes a white star for each Pathfinder there'
   assert.deepEqual(beads(pia, 'service').map((b) => [b.status, b.label]), [['proposed', 'Food pantry sort']]);
 });
 
-test('attendance source: "planned" counts only Pathfinder-planned meetings; "all" (admin) counts every event she checked in to', async () => {
+test('attendance source: every event she attends earns a bead by default; "planned" (admin) limits it to Pathfinder-planned meetings', async () => {
   const other = addEvent('Troop Campout', daysAgo(4));
   attend(other, pia);
   pathfinder.proposeForEvent(db, db.prepare('SELECT * FROM events WHERE id = ?').get(other), 'UTC');
-  assert.equal(beads(pia, 'attendance').filter((b) => b.event_id === other).length, 0);
-  assert.equal((await call('POST', '/api/v1/admin/pathfinder/settings', { attendanceSource: 'all' })).status, 403, 'leaders cannot change it');
+  assert.equal(beads(pia, 'attendance').filter((b) => b.event_id === other).length, 1, 'an unplanned event still earns her a bead');
+  assert.equal((await call('POST', '/api/v1/admin/pathfinder/settings', { attendanceSource: 'planned' })).status, 403, 'leaders cannot change it');
   assert.equal((await call('POST', '/api/v1/admin/pathfinder/settings', { attendanceSource: 'some' }, adminT)).status, 400);
-  assert.equal((await call('POST', '/api/v1/admin/pathfinder/settings', { attendanceSource: 'all' }, adminT)).status, 200);
+  assert.equal((await call('POST', '/api/v1/admin/pathfinder/settings', { attendanceSource: 'planned' }, adminT)).status, 200);
   await call('POST', '/api/v1/pathfinder/rescan', { from: ymd(daysAgo(30)) });
-  assert.equal(beads(pia, 'attendance').filter((b) => b.event_id === other).length, 1);
-  await call('POST', '/api/v1/admin/pathfinder/settings', { attendanceSource: 'planned' }, adminT);
+  assert.equal(beads(pia, 'attendance').filter((b) => b.event_id === other).length, 0, 'the proposal is withdrawn');
+  await call('POST', '/api/v1/admin/pathfinder/settings', { attendanceSource: 'all' }, adminT);
   await call('POST', '/api/v1/pathfinder/rescan', { from: ymd(daysAgo(30)) });
-  assert.equal(beads(pia, 'attendance').filter((b) => b.event_id === other).length, 0, 'the proposal is withdrawn again');
+  assert.equal(beads(pia, 'attendance').filter((b) => b.event_id === other).length, 1, 'and proposed again');
 });
 
 // ------------------------------------------------------- deciding beads --

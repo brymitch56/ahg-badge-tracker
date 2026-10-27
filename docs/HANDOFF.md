@@ -43,9 +43,9 @@
 > finish stones) and tracker (`pf_beads`: attendance, memory-verse hearts,
 > service stars, stone logo beads). Check-in attendance PROPOSES beads and
 > planned award items (`proposals.proposeForEvent` calls the Pathfinder
-> proposer); memory verses are marked directly. Which check-ins earn an
-> attendance bead is an admin setting (`pathfinder_attendance_source`:
-> planned meetings | every event). Each confirmed bead queues a `bead` push
+> proposer); memory verses are marked directly. Every attended event earns
+> an attendance bead (confirmed with the troop); an admin can limit it to
+> planned meetings (`pathfinder_attendance_source`: all | planned). Each confirmed bead queues a `bead` push
 > row; `servicepush.pushBeadNotes` appends one line to AHGFamily's single
 > instance per bead (behind `push_pathfinder_enabled`, off — run
 > `docs/pathfinder-bead-push-verification.md` first). Fanny Crosby and
