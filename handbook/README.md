@@ -179,3 +179,15 @@ stones meeting by meeting and tracks their beads and two awards.
   `handbook/pathfinder.example.json`. The tracker reads it at request time
   from `PATHFINDER_DIR` (default `data/pathfinder/`) — copy the folder to the
   Pi; no import step.
+
+## Awards (`handbook/awards.json`)
+
+The website's Awards tab covers Tenderheart through Patriot: each Level Award,
+the Joining Award, the NCC Catholic Faith Awards and Stars & Stripes readiness
+(`server/lib/awards.js`). `handbook/awards.json` (committable — program
+structure only) names the award ids, which requirement numbers the tab can
+offer as *ready to record* (one badge per frontier, Faith Award programming,
+yearly service hours) and the Stars & Stripes badges and steps. The build makes
+any named award without an annotation from AHGFamily's short titles, and the
+weekly pull reads them all. Stars & Stripes isn't on AHGFamily: its steps are
+tracker-only marks (`award_marks`, migration 015), never pulled or pushed.

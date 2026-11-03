@@ -22,6 +22,7 @@ const report = require('./lib/report');
 const access = require('./lib/access');
 const faith = require('./lib/faith');
 const pathfinder = require('./lib/pathfinder');
+const awards = require('./lib/awards');
 
 let VERSION = null;
 try { VERSION = require(path.join(__dirname, '..', 'package.json')).version; } catch { /* stripped install */ }
@@ -298,6 +299,15 @@ function createApp({ cfg, db, jwks = null, issuer = null, checkinFetch = undefin
   }));
 
   // ---------------------------------------------------------- Pathfinder --
+  // The Awards tab (server/lib/awards.js): level awards, Joining, Catholic
+  // Faith Awards, Stars & Stripes. Requirements are recorded via /completions.
+  api.get('/awards', leader, (req, res) => res.json(awards.awardsCatalog(db)));
+  api.get('/awards/status', leader, (req, res) => res.json(awards.awardsStatus(db)));
+  api.post('/awards/stars/mark', leader, (req, res) => {
+    try { awards.markStep(db, req.body || {}, req.user.email); return res.json({ ok: true }); } catch (err) { return completionErr(res, err); }
+  });
+  api.post('/awards/stars/unmark', leader, (req, res) => { awards.unmarkStep(db, req.body || {}); res.json({ ok: true }); });
+
   // The Pathfinder page (server/lib/pathfinder.js): stepping-stone meeting
   // plans, beads (proposed from attendance, confirmed by a leader), memory
   // verses, and the Fanny Crosby / Joining Awards.

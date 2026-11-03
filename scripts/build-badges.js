@@ -150,6 +150,10 @@ function loadFaithConfig(file = path.join(__dirname, '..', 'handbook', 'faith.js
 }
 
 // handbook/pathfinder.json: the Pathfinder awards and stepping stones.
+function loadAwardsConfig(file = path.join(__dirname, '..', 'handbook', 'awards.json')) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+}
+
 function loadPathfinderConfig(file = path.join(__dirname, '..', 'handbook', 'pathfinder.json')) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
 }
@@ -299,9 +303,29 @@ function main(argv) {
       write(r.badge);
     }
   }
+  // Awards tab: level awards the handbook hasn't filled and the Catholic Faith
+  // Awards (no handbook prints those), from AHGFamily's short titles. An
+  // annotation replaces the text under the same ids.
+  const awardsCfg = noFaith ? null : loadAwardsConfig();
+  if (awardsCfg && !only) {
+    for (const id of [...Object.values(awardsCfg.levelAwards || {}), ...Object.values(awardsCfg.catholic || {}).flat()]) {
+      if (annotated.has(id)) continue;
+      const award = readAward(id);
+      const r = buildCatalogOnly(award, { fetchedAt: award && award.source ? award.source.fetchedAt || null : null });
+      if (r.errors) {
+        refused++;
+        console.log(`✗ award ${award ? award.name : id}`);
+        for (const m of r.errors) console.log(`    - ${m}`);
+        continue;
+      }
+      fromCatalog++;
+      console.log(`✓ award ${r.badge.name} → ${r.badge.id}.json  (${r.badge.requirementCount} requirements, AHGFamily titles only)`);
+      write(r.badge);
+    }
+  }
   console.log(`\n${built} built, ${fromCatalog ? `${fromCatalog} from AHGFamily titles, ` : ''}${refused} refused${check ? ' (check only — nothing written)' : ` → ${outDir}`}`);
   process.exit(refused ? 1 : 0);
 }
 
 if (require.main === module) main(process.argv.slice(2));
-module.exports = { FRONTIERS, normalizeFrontier, frontierForName, buildBadge, catalogRequirements, loadFaithConfig, loadPathfinderConfig, faithTag, buildCatalogOnly, faithAwardIds };
+module.exports = { loadAwardsConfig, FRONTIERS, normalizeFrontier, frontierForName, buildBadge, catalogRequirements, loadFaithConfig, loadPathfinderConfig, faithTag, buildCatalogOnly, faithAwardIds };

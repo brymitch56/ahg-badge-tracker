@@ -444,4 +444,4 @@ function faithYear(db, { from, to }) {
   };
 }
 
-module.exports = { LEVELS, faithConfig, setFaithConfig, faithCatalog, importStudies, importStudiesFromDir, updateStep, StudyError, awardStatus, girlAwardAtLevel, recordLinked, listStudies, createStudy, updateStudy, faithYear, covers };
+module.exports = { LEVELS, finishedAt, girlAwardAtLevel, faithConfig, setFaithConfig, faithCatalog, importStudies, importStudiesFromDir, updateStep, StudyError, awardStatus, girlAwardAtLevel, recordLinked, listStudies, createStudy, updateStudy, faithYear, covers };

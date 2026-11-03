@@ -151,3 +151,82 @@ spread during its segment, and all were correct.
   tracking sheets.
 - `handbook.images` (leaders-only SharePoint paths): the page images from
   Step 0 could be uploaded there later.
+
+# Pioneer & Patriot handbook → annotations
+
+Same method and copyright rule as above. This section holds page numbers and
+names only.
+
+## Source
+
+`Pioneer & Patriot Handbook.pdf` (leaders' machine, scanned-badges folder,
+copyright 2020): 336 pages, 151 MB, 200 dpi JPEG per page (1700 × 2200 once
+upright; every page is stored rotated, which the extractor now corrects).
+
+**PDF page n = printed page n, for every page.** The covers weren't scanned.
+Printed numbers were checked on pp. 8–336, and none are missing or out of order.
+Extract with `npm run extract:handbook-pages -- "<scan.pdf>" --book pipa --width 1700`
+into `data/handbook-pages/pipa/`. `--raw` names files by PDF page, for working
+out the mapping of a new scan.
+
+## Layout facts that differ from TH/EX
+
+- Each badge has one level group, `Pioneer/Patriot`, written to
+  `data/handbook/<slug>.pipa.json`. Page ranges come from the Badge Index (p. 336).
+- Level awards: overview pp. 64–65, requirements on the tracking sheets:
+  Harriet Tubman p. 314, Abigail Adams p. 318. The planning guides (pp. 315–317,
+  319–322) are not requirements.
+- Stars & Stripes: pp. 66–67 give an outline and the required badges, not full
+  requirements (those are in AHG's Stars & Stripes Award Guide). AHGFamily has no
+  such award, so `handbook/awards.json` names it for the website's Awards tab.
+- The Joining Award is on pp. 32–33.
+
+## Segments
+
+| # | frontier | pages | badges |
+|---|---|---|---|
+| 1 | Heritage I | 74–87 | Ancestor Detector, Caring for Creation, Citizenship & Government, Dawn of Our Country, Freedom Seekers, Living in the USA, Native American |
+| 2 | Heritage II | 88–101 | Our Constitution, Our Flag, Our Heritage, U.S. Military Heroes, Women of Faith, World Heritage |
+| 3 | Family Living I | 102–119 | Auto Care & Safety, Cake Decorating, Cooking, Family Helper, Home Care & Repair, Home Decorating, Kid Care, Money Management |
+| 4 | Family Living II | 120–133 | Pet Care, Scrapbooking, Sewing, Sustainable Living, Together as A Family, Toys & Games |
+| 5 | Arts I | 134–147 | Art History, Cinematography, Crafts, Creative Writing, Dance, Fine Arts, Graphic Design |
+| 6 | Arts II | 148–163 | Music Appreciation, Music Performance, Needle Arts, Pen & Paper Arts, Photography, Puppetry, Textile Arts, Theater |
+| 7 | Outdoor Skills I | 164–181 | Archery, Boating, Camping, Canoeing, Cycling, Fire Safety & Fire Building, Fishing, Geocaching & Orienteering, Hiking |
+| 8 | Outdoor Skills II | 182–199 | Horsemanship, Nature & Wildlife, Outdoor Cooking, Outdoor Skills, Rock Climbing, Shooting Sports, Survival, Search, & Rescue, Swimming |
+| 9 | Personal Well-Being I | 200–223 | All God's Children, Bible Basics, Biblical Leadership, Book Adventurer, Daughter of the King, Emergency Preparedness, Entrepreneurship, Fashion, Identity, Mission Minded |
+| 10 | Personal Well-Being II | 224–237 | Personal Care, Physical Fitness, Public Speaking, Sign Language, Social Skills & Etiquette, Travel, World Languages |
+| 11 | Science & Technology I | 238–259 | Architecture, Astronomy, Aviation, Biomimicry, Communication Technology, Digital Citizenship, Engineering, Entomology, Fresh Water & Marine Biology |
+| 12 | Science & Technology II | 260–283 | Geology, Horticulture, Internet Adventure, Kitchen Scientist, Living & Working in Space, Mathematics, Medical, Meteorology, Ornithology, Robotics, Women Inventors, Zoology |
+
+## Results (Nov 2, 2026)
+
+All 12 segments ran, and the two level awards were filled by hand. Every badge
+the book prints builds: 97 `.pipa` files and both level awards. The only
+refusals left are the two TH/EX editions listed above. No word was unreadable,
+and every requirement count and rule matched the catalog.
+
+The older pilots came from a different printing and were rechecked against this
+scan: Our Flag (was pp. 88–89), Toys & Games (130–131) and Nature & Wildlife
+(182–183) are now pp. 90–91, 132–133 and 184–185. Nature & Wildlife requirement 4
+also has different wording in this printing.
+
+To check against the paper copy or AHG:
+
+| page | what |
+|---|---|
+| 192–194 | Shooting Sports prints "either the Rifle section or the Shotgun section", but the catalog has both as groups with no rule, so the tracker treats the badge as needing both. The tracker can't express either/or between groups yet, so a girl who finishes one section won't show the badge complete. |
+| 33 | Joining Award wording differs from AHGFamily's titles. It stays built from the titles because one record serves every level, including Pathfinders. |
+| 318 | Abigail Adams requirements 9 and 12 differ from AHGFamily's titles. The annotation has the book's wording. |
+
+Printed oddities kept as printed: Women of Faith req 14 "positon"; Archery Faith
+Connection "Ismael"; Ornithology AHG History "origianlly"; Robotics intro
+"otherwise by dangerous"; Medical req 4 "choose her or her"; Shooting Sports
+printed req 14 "types of rifles" in the shotgun box; Joining p. 33 "truddy".
+
+Pages with no requirements, assigned to no badge: 119, 195, 207, 223, 251, 255.
+
+Not annotated:
+
+- B.Y. Faith Award and NCC Catholic Faith Awards: no handbook prints them, so
+  they build from AHGFamily's titles.
+- Sports Pins (pp. 284–312): level group `All`, out of scope as with TH/EX.
