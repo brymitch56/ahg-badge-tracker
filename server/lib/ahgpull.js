@@ -28,6 +28,7 @@ const { parseGridState, parseStandardState, parseAhgDate } = require('../../lib/
 const mapping = require('./mapping');
 const ahgtrust = require('./ahgtrust');
 const { recordRun } = require('./mirror');
+const { pulledAwardIds } = require('./awards');
 
 class PullError extends Error {
   constructor(code, msg) { super(msg); this.code = code; }
@@ -81,7 +82,8 @@ async function makeLiveSession(db, { key = null, env = process.env } = {}) {
 /**
  * Badges worth pulling: active AND touched by this troop (spec §7 — never all
  * 548), plus each level's Faith Award, so an award earned on AHGFamily shows
- * on the Faith tab before anyone plans it (four requests). Faith studies
+ * on the Faith tab before anyone plans it (four requests), and the Awards
+ * tab's awards likewise (handbook/awards.json). Faith studies
  * (faith = 'study', built from the Faith Award guide) exist only here —
  * AHGFamily has no requirements for them — so they are never pulled and
  * their completions never queue.
@@ -93,7 +95,8 @@ function activeBadges(db) {
       OR EXISTS (SELECT 1 FROM requirements r JOIN plan_items pi ON pi.requirement_id = r.id WHERE r.badge_id = b.id)
       OR EXISTS (SELECT 1 FROM requirements r JOIN ahg_state s ON s.requirement_id = r.id WHERE r.badge_id = b.id)
       OR b.faith = 'award'
-    ) ORDER BY b.id`).all();
+      OR b.ahg_award_id IN (SELECT value FROM json_each(?))
+    ) ORDER BY b.id`).all(JSON.stringify(pulledAwardIds()));
 }
 
 /**

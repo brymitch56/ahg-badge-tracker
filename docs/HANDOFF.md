@@ -55,6 +55,15 @@
 > outlines live in gitignored `data/pathfinder/stones.json`. To deploy:
 > build + copy `data/badges/` and `data/pathfinder/` + Re-import.
 
+> **Update — Nov 2, 2026 (v0.6.0): Pioneer & Patriot handbook and the Awards tab.**
+> Every Pioneer/Patriot badge and both level awards now have the book's wording
+> (`docs/handbook-ocr-plan.md`, second half). Migration 015 and
+> `server/lib/awards.js` back the website's Awards tab: Level Awards, Joining,
+> NCC Catholic Faith Awards and Stars & Stripes readiness, with ready-to-record
+> items derived from finished badges, the Faith Award and service hours
+> (`handbook/README.md` "Awards"). To deploy: build + copy `data/badges/` +
+> Re-import (adds the 17 NCC awards; the weekly pull reads about 23 more awards).
+
 Read `CLAUDE.md` first (public repo, PII rules, read-only AHGFamily rule,
 copyright rule). Then this file, then `docs/tracker-service-spec.md`
 (draft 3) and `docs/service-stars-plan.md` (draft 2, next feature).

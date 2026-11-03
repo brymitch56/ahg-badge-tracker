@@ -1,0 +1,46 @@
+{
+  "_source": "AHG program structure, not handbook prose — committable. Award ids are AHGFamily's. Stars & Stripes facts come from the Pioneer & Patriot handbook pp. 66–67 as names only; It is the capstone award: AHG national approves it, AHGFamily has no such award, so the tracker keeps it itself and never pushes it.",
+  "levelAwards": {
+    "Tenderheart": "awrad6zhmpkm",
+    "Explorer": "awthbazw3q8i",
+    "Pioneer": "aw0f6s83gqm2",
+    "Patriot": "awa6o0mrggn2"
+  },
+  "joining": "aw8ac462c3be",
+  "catholic": {
+    "Tenderheart": ["aw2rri9eekfd", "aw2rri9eekfe", "aw2rri9eekff", "aw2rri9eekfg"],
+    "Explorer": ["aw2rri9eekfh", "aw2rri9eekfi", "aw2rri9eekfj", "aw2rri9eekfk"],
+    "Pioneer": ["aw2rri9eekfl", "aw2rri9eekfm", "aw2rri9eekfn"],
+    "Patriot": ["aw2rri9eekfo", "aw2rri9eekfp", "aw2rri9eekfr", "aw2rri9eekfs", "aw2rri9eekfq", "aw2rri9eekft"]
+  },
+  "_derive": "What the Awards tab offers as ready to record, per level award: the requirement numbers for one-badge-per-frontier, Faith Award programming and yearly service. serviceHours = hours per program year at that level; catholicSegments = segments that stand in for one component of the B.Y. Faith Award. A leader still records it.",
+  "derive": {
+    "Tenderheart": { "frontier": 4, "faith": 5, "service": 6, "serviceHours": 5, "catholicSegments": 1 },
+    "Explorer": { "frontier": 4, "faith": 5, "service": 6, "serviceHours": 10, "catholicSegments": 1 },
+    "Pioneer": { "frontier": 4, "faith": 5, "service": 6, "serviceHours": 15, "catholicSegments": 1 },
+    "Patriot": { "frontier": 5, "faith": 6, "service": 7, "serviceHours": 20, "catholicSegments": 2 }
+  },
+  "starsAndStripes": {
+    "pages": [66, 67],
+    "prerequisite": "Patriot",
+    "requiredBadges": [
+      { "frontier": "Heritage", "badges": ["Our Constitution", "Women of Faith"] },
+      { "frontier": "Family Living", "badges": ["Home Care & Repair", "Money Management"] },
+      { "frontier": "Outdoor Skills", "badges": ["Camping", "Outdoor Skills"] },
+      { "frontier": "Personal Well-Being", "badges": ["Emergency Preparedness", "Biblical Leadership", "Personal Care", "Social Skills & Etiquette"] },
+      { "frontier": "Science & Technology", "badges": ["Digital Citizenship"] }
+    ],
+    "fitnessBadge": "Physical Fitness",
+    "steps": [
+      { "key": "candidacy", "label": "Candidacy granted" },
+      { "key": "fitness", "label": "Fitness badge or sports pin" },
+      { "key": "choice", "label": "One badge of her choice" },
+      { "key": "leadership", "label": "Six-month Girl Leadership Position" },
+      { "key": "project", "label": "Service project (100+ hours, ten leading youth)" },
+      { "key": "documentation", "label": "Documentation" },
+      { "key": "board", "label": "Board of Review" },
+      { "key": "submitted", "label": "Submitted to AHG national" },
+      { "key": "approved", "label": "Approved by AHG national" }
+    ]
+  }
+}
