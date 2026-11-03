@@ -344,3 +344,30 @@ test('rule 8: auth failure latches the service pull too; scheduler runs it weekl
   assert.equal(out.service && out.service.kind, 'service');
   sdb.close();
 });
+
+test('service pull mirrors whole-award records across pages, skips stars, and marks what vanished', async () => {
+  const row = (adId, awardId, date) => `<tr data-key="${adId}"><td>All Levels</td><td><a href="/advancement/index?award=${awardId}">Some Award</a></td><td>100/100</td><td>${date ? `Completed on: ${date}` : ''}</td><td></td></tr>`;
+  const page = (rows, from, total, pager) => `<html><body><a href="/profile/${Y_CORA}?tab=overview">Overview</a>
+<div id="advancement_grid" class="grid-view"><div class="summary">Showing <b>${from}-${from + rows.length - 1}</b> of <b>${total}</b> items.</div>
+<table class="kv-grid-table"><thead><tr><th>Program</th><th>Awards Title</th><th>Progress</th><th>Completed On</th><th>Menu</th></tr></thead><tbody>${rows.join('')}</tbody></table>
+<div class="panel-footer"><ul class="pagination">${pager.map((h, i) => `<li><a href="${h}" data-page="${i}">${i + 1}</a></li>`).join('')}</ul></div></div>
+<div id="service_grid" class="grid-view"><div class="summary">Showing <b>1-0</b> of <b>0</b> items.</div>
+<table class="kv-grid-table"><thead><tr><th>Service Date</th><th>Act of Service</th><th>Time Spent</th><th>Girl Level</th><th>Verified</th><th>Menu</th></tr></thead><tbody></tbody></table></div></body></html>`;
+  const saved = { ...scenario.profiles };
+  const pager = [`/profile/${Y_CORA}?tab=advancement&page=1&per-page=100`, `/profile/${Y_CORA}?tab=advancement&page=2&per-page=100`];
+  scenario.profiles = { [Y_BEA]: saved[Y_BEA] || { 1: profilePage(Y_BEA, { rows: [] }) }, [Y_CORA]: {
+    1: page([row('adwhole00001', 'awwhole00001', '05/20/2015'), row('adwhole00002', 'awwhole00002', '')], 1, 3, pager),
+    2: page([row('adwhole00003', 'awwhole00003', '06/01/2016')], 3, 3, pager),
+  } };
+  const { pullServiceState } = require('../server/lib/servicepull');
+  const pull = () => pullServiceState(db, cfg, { sessionFactory: fakeSessionFactory, key: KEY });
+  await pull();
+  const rows = () => db.prepare("SELECT ahg_award_id a, completed_on d, missing_since m FROM award_instances WHERE girl_id = ? AND ahg_award_id LIKE 'awwhole%' ORDER BY a").all(cora);
+  assert.deepEqual(rows().map((r) => [r.a, r.d, r.m]), [['awwhole00001', '2015-05-20', null], ['awwhole00003', '2016-06-01', null]], 'page 2 read; the unfinished row skipped');
+  scenario.profiles[Y_CORA] = { 1: page([row('adwhole00001', 'awwhole00001', '05/20/2015')], 1, 1, []) };
+  await pull();
+  assert.ok(rows().find((r) => r.a === 'awwhole00003').m, 'gone from a full read: marked missing');
+  assert.equal(rows().find((r) => r.a === 'awwhole00001').m, null);
+  db.prepare("DELETE FROM award_instances WHERE ahg_award_id LIKE 'awwhole%'").run();
+  scenario.profiles = saved;
+});

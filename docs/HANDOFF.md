@@ -64,6 +64,15 @@
 > (`handbook/README.md` "Awards"). To deploy: build + copy `data/badges/` +
 > Re-import (adds the 17 NCC awards; the weekly pull reads about 23 more awards).
 
+> **Update — Nov 2, 2026 (v0.6.1): whole-award records.** AHGFamily can hold an
+> award as complete (a record with a completed date on the profile's awards
+> grid) with its requirement boxes blank. The service pull now mirrors those
+> records into `award_instances` (all pages; stars keep their own read), and
+> `server/lib/awardrecords.js` makes them count as earned everywhere
+> (`badgeStatusFor`, Faith, Pathfinder, Awards), stops proposals and box pushes
+> for those awards, and sets `level_at_completion` on AHGFamily-sourced
+> completions from the badge's level or the service ledger's level stamp.
+
 Read `CLAUDE.md` first (public repo, PII rules, read-only AHGFamily rule,
 copyright rule). Then this file, then `docs/tracker-service-spec.md`
 (draft 3) and `docs/service-stars-plan.md` (draft 2, next feature).

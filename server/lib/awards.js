@@ -21,6 +21,7 @@ const fs = require('fs');
 const path = require('path');
 const { badgeStatusFor, CompletionError } = require('./proposals');
 const faith = require('./faith');
+const { wholeAward } = require('./awardrecords');
 
 const LEVELS = ['Tenderheart', 'Explorer', 'Pioneer', 'Patriot'];
 const AWARDS_FILE = path.join(__dirname, '..', '..', 'handbook', 'awards.json');
@@ -81,9 +82,11 @@ function serviceYears(db, girlId, level) {
   return [...by.entries()].sort((a, b) => a[0] - b[0]).map(([year, hundredths]) => ({ year, hours: hundredths / 100 }));
 }
 
-/** Badges she has any confirmed completion in; a badge outside this list can't be finished, so nothing else needs checking. */
-const badgesTouched = (db, girlId) => db.prepare(`SELECT DISTINCT b.* FROM completions c JOIN requirements r ON r.id = c.requirement_id JOIN badges b ON b.id = r.badge_id
-  WHERE c.girl_id = ? AND c.status = 'confirmed' AND b.active = 1 ORDER BY b.name`).all(girlId);
+/** Badges she has a confirmed completion or a completed AHGFamily record in; a badge outside this list can't be finished, so nothing else needs checking. */
+const badgesTouched = (db, girlId) => db.prepare(`SELECT b.* FROM badges b WHERE b.active = 1 AND (
+    b.id IN (SELECT r.badge_id FROM completions c JOIN requirements r ON r.id = c.requirement_id WHERE c.girl_id = ? AND c.status = 'confirmed')
+    OR b.ahg_award_id IN (SELECT ahg_award_id FROM award_instances WHERE girl_id = ? AND missing_since IS NULL AND completed_on IS NOT NULL)
+  ) ORDER BY b.name`).all(girlId, girlId);
 
 /** Her finished frontier badges at a level: frontier → [{ name, completedOn }], earliest first. */
 function frontierBadges(db, girl, level) {
@@ -146,6 +149,7 @@ function girlAward(db, girl, badge, ready = new Map()) {
   const live = new Map(db.prepare(`SELECT c.* FROM completions c JOIN requirements r ON r.id = c.requirement_id
     WHERE c.girl_id = ? AND r.badge_id = ? AND c.status <> 'rejected'`).all(girl.id, badge.id).map((c) => [c.requirement_id, c]));
   const pushRow = db.prepare('SELECT status, last_error FROM push_queue WHERE completion_id = ? ORDER BY id DESC LIMIT 1');
+  const earnedOn = wholeAward(db, girl.id, badge.ahg_award_id);
   const items = {};
   let done = 0; let pending = 0; let readyCount = 0;
   for (const r of reqs) {
@@ -154,12 +158,12 @@ function girlAward(db, girl, badge, ready = new Map()) {
       const push = pushRow.get(c.id);
       items[r.id] = { status: c.status, completionId: c.id, completedOn: c.completed_on, source: c.source, notes: c.notes, push: push ? { status: push.status, error: push.last_error } : null };
       if (c.status === 'confirmed') done += 1; else pending += 1;
-    } else if (ready.has(r.id)) {
+    } else if (ready.has(r.id) && !earnedOn) {
       items[r.id] = { status: 'ready', ...ready.get(r.id) };
       readyCount += 1;
     }
   }
-  return { done, total: reqs.length, pending, ready: readyCount, complete: badgeStatusFor(db, girl.id, badge.id).status === 'complete', items };
+  return { done, total: reqs.length, pending, ready: readyCount, earnedOn, complete: badgeStatusFor(db, girl.id, badge.id).status === 'complete', items };
 }
 
 /** Where she stands on Stars & Stripes: the prerequisite, the required badges and the marked steps. */

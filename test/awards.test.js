@@ -166,6 +166,51 @@ test('Stars & Stripes: badges derive, steps are marks, unknown steps are refused
   assert.throws(() => awards.markStep(db, { girlId: girl, step: 'candidacy', doneOn: 'soon' }, 'x'), /doneOn/);
 });
 
+test('a completed AHGFamily record earns an award with its boxes blank', () => {
+  const j = db.prepare('SELECT id FROM badges WHERE ahg_award_id = ?').get(CFG.joining).id;
+  assert.equal(status().awards[j].complete, false);
+  const rec = db.prepare(`INSERT INTO award_instances (girl_id, ahg_award_id, ad_record_id, completed_on, first_seen_at, fetched_at)
+    VALUES (?, ?, 'adtest000001', '2015-05-20', '2026-01-01', '2026-01-01')`).run(girl, CFG.joining);
+  const a = status().awards[j];
+  assert.equal(a.complete, true);
+  assert.equal(a.earnedOn, '2015-05-20');
+  assert.equal(a.done, 0, 'the boxes stay as they are');
+  db.prepare("UPDATE award_instances SET missing_since = '2026-02-01' WHERE id = ?").run(rec.lastInsertRowid);
+  assert.equal(status().awards[j].complete, false, 'a record that vanished stops counting');
+  db.prepare('UPDATE award_instances SET missing_since = NULL WHERE id = ?').run(rec.lastInsertRowid);
+});
+
+test('a badge earned as a whole counts toward a level award, and an earned level award offers nothing to record', () => {
+  const g = Number(db.prepare(`INSERT INTO girls (checkin_person_id, first_name, last_name, ahg_level, updated_at) VALUES (903, 'Whole', 'Example', 'Pioneer', '2026-01-01')`).run().lastInsertRowid);
+  const rec = (award, on, ad) => db.prepare(`INSERT INTO award_instances (girl_id, ahg_award_id, ad_record_id, completed_on, first_seen_at, fetched_at) VALUES (?, ?, ?, ?, '2026-01-01', '2026-01-01')`).run(g, award, ad, on);
+  rec('aw00ourflag0', '2025-01-02', 'adtest000002');
+  const one = () => awards.awardsStatus(db).girls.find((x) => x.girlId === g);
+  const it = one().awards[pioneer()].items[`${pioneer()}:4a`];
+  assert.equal(it.status, 'ready');
+  assert.equal(it.completedOn, '2025-01-02');
+  assert.equal(one().starsAndStripes.required[0].done, true);
+  rec(CFG.levelAwards.Pioneer, '2025-06-01', 'adtest000003');
+  const a = one().awards[pioneer()];
+  assert.equal(a.complete, true);
+  assert.equal(a.ready, 0);
+});
+
+test('levels: a one-level badge counts at its level; a multi-level one at her ledger level that day', () => {
+  const { levelForCompletion, levelOnDate } = require('../server/lib/awardrecords');
+  const add = (rec, date, level) => db.prepare(`INSERT INTO service_hours (girl_id, ahg_record_id, date, level, hundredths, verified, fetched_at) VALUES (?, ?, ?, ?, 100, 1, '2026-01-01')`).run(other, rec, date, level);
+  add('l1', '2022-10-01', 'Explorer');
+  add('l2', '2024-10-01', 'Pioneer');
+  add('l3', '2026-10-01', 'Patriot');
+  const g = { id: other, ahg_level: 'Patriot' };
+  assert.equal(levelForCompletion(db, g, 'Tenderheart', '2019-01-01'), 'Tenderheart');
+  assert.equal(levelOnDate(db, other, '2025-05-01'), 'Pioneer');
+  assert.equal(levelForCompletion(db, g, 'Pioneer/Patriot', '2025-05-01'), 'Pioneer');
+  assert.equal(levelForCompletion(db, g, 'Pioneer/Patriot', '2026-11-01'), 'Patriot');
+  assert.equal(levelForCompletion(db, g, 'Pioneer/Patriot', '2023-01-01'), 'Pioneer', 'never below Pioneer');
+  assert.equal(levelForCompletion(db, g, 'All', '2021-01-01'), 'Explorer', 'before any stamp: her earliest');
+  assert.equal(levelForCompletion(db, { id: girl + 500, ahg_level: 'Explorer' }, 'All', '2021-01-01'), 'Explorer', 'no ledger: her current level');
+});
+
 test('the weekly pull reads every award on the tab', () => {
   const ids = awards.pulledAwardIds();
   for (const id of [...Object.values(CFG.levelAwards), CFG.joining, 'aw00segment1', 'aw00medal000']) assert.ok(ids.includes(id), id);

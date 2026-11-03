@@ -32,6 +32,7 @@ const fs = require('fs');
 const path = require('path');
 const { PLAN_LEVEL_GROUPS, PlanError, yearOverview } = require('./plans');
 const { PLAN_GIRL_LEVELS, badgeStatusFor, manualCompletion, CompletionError } = require('./proposals');
+const { wholeAward, levelForCompletion } = require('./awardrecords');
 
 const LEVELS = ['Tenderheart', 'Explorer', 'Pioneer', 'Patriot'];
 const FAITH_FILE = path.join(__dirname, '..', '..', 'handbook', 'faith.json');
@@ -130,7 +131,7 @@ const badgeDoneOn = (db, girlId, badgeId) => db.prepare(`SELECT MAX(c.completed_
 function finishedAt(db, girl, b, level) {
   const st = badgeStatusFor(db, girl.id, b.id);
   if (st.status !== 'complete') return { status: st.status, confirmedCount: st.confirmedCount };
-  const done = badgeDoneOn(db, girl.id, b.id);
+  const done = st.wholeAward ? { d: st.wholeAward, lvl: levelForCompletion(db, girl, b.level_group, st.wholeAward) } : badgeDoneOn(db, girl.id, b.id);
   // with no level on record, her current level
   const at = done.lvl || girl.ahg_level;
   const multi = b.level_group === 'All' || b.level_group === 'Pioneer/Patriot';
@@ -175,6 +176,12 @@ function girlAwardAtLevel(db, girl, level) {
     const via = { requirementId: null, title: b.name, viaBadgeId: b.id, viaBadgeName: b.name, viaKind: 'study' };
     if (st.status === 'complete') offline.push({ ...via, completedOn: st.completedOn });
     else if (st.status === 'in_progress') underway.push({ ...via, confirmedCount: st.confirmedCount });
+  }
+  // a completed record on AHGFamily earns it, whichever study it was
+  const whole = wholeAward(db, girl.id, award.ahg_award_id);
+  if (whole) {
+    earned.push({ requirementId: null, title: 'Recorded on AHGFamily', completedOn: whole, source: 'ahgfamily', notes: null });
+    ready.length = 0;
   }
   const status = earned.length || offline.length ? 'earned' : pending.length ? 'pending' : ready.length ? 'ready' : underway.length ? 'in_progress' : 'not_started';
   return { level, badgeId: award.id, status, earned, offline, pending, ready, underway };
