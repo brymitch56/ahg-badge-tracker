@@ -34,6 +34,7 @@ const fs = require('fs');
 const path = require('path');
 const { localDate, decideRows, CompletionError } = require('./proposals');
 const { getSetting, setSetting } = require('./settings');
+const { wholeAward, wholeAwardForRequirement } = require('./awardrecords');
 
 const CONFIG_FILE = path.join(__dirname, '..', '..', 'handbook', 'pathfinder.json');
 const KINDS = ['attendance', 'verse', 'service', 'stone'];
@@ -307,6 +308,7 @@ function proposeForEvent(db, event, tz) {
         addBead(g, 'verse', { stone: v.stone, verse: v.verse, label: event.title });
       }
       for (const rid of reqIds) {
+        if (wholeAwardForRequirement(db, g.id, rid)) continue;
         if (db.prepare("SELECT 1 FROM completions WHERE girl_id = ? AND requirement_id = ? AND (status <> 'rejected' OR event_id = ?)").get(g.id, rid, event.id)) continue;
         const what = parts.filter((p) => p.requirement_id === rid).map((p) => p.what).filter(Boolean).join('; ');
         db.prepare(`INSERT INTO completions (girl_id, requirement_id, status, completed_on, event_id, source, proposed_at, notes)
@@ -519,7 +521,8 @@ function awardStatus(db, girlId, awardId) {
     const c = db.prepare("SELECT status, completed_on FROM completions WHERE girl_id = ? AND requirement_id = ? AND status <> 'rejected'").get(girlId, r.id);
     return { requirementId: r.id, number: r.number, letter: r.letter, title: r.title, status: c ? c.status : null, completedOn: c ? c.completed_on : null };
   });
-  return { done: items.filter((i) => i.status === 'confirmed').length, total: items.length, complete: items.length > 0 && items.every((i) => i.status === 'confirmed'), items };
+  const whole = wholeAward(db, girlId, awardId);
+  return { done: items.filter((i) => i.status === 'confirmed').length, total: items.length, wholeAward: whole, complete: !!whole || items.length > 0 && items.every((i) => i.status === 'confirmed'), items };
 }
 
 /** Every active Pathfinder with her bead counts, beads, stones, verses and award progress. */

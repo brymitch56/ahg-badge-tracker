@@ -34,6 +34,7 @@ const stars = require('../../lib/stars');
 const mapping = require('./mapping');
 const { recordRun } = require('./mirror');
 const ahgpull = require('./ahgpull');
+const { levelForCompletion } = require('./awardrecords');
 
 const { PullError } = ahgpull;
 const now = () => new Date().toISOString();
@@ -78,6 +79,23 @@ async function fetchProfile(session, girl, summary, db) {
     for (const w of more.warnings) if (!/PAGE, do not trust/.test(w)) warn(w);
   }
   if (!p.ledger.complete) throw new PullError('parse', `girl ${girl.id}: ledger still incomplete after paging — run aborted`);
+  // page the awards grid the same way. It shares the page parameter with the
+  // ledger, so only its own rows are taken from each page. A shortfall here
+  // only keeps earlier records: the run still mirrors the ledger.
+  const seenAwards = new Set([first]);
+  guard = 0;
+  while (p.awards.summary && !p.awards.complete && guard++ < 50) {
+    const next = (p.awards.pagerHrefs || []).map(relHref).find((h) => h && !seenAwards.has(h) && /[?&]page=\d+/.test(h) && !/[?&]page=1(&|$)/.test(h));
+    if (!next) { warn('awards grid is longer than one page but has no next-page link'); break; }
+    seenAwards.add(next);
+    const more = parseProfileAdvancement(await withAuthLatch(db, () => session.page(next)));
+    summary.requests += 1;
+    if (!more.awards.rows.length) { warn(`awards page ${next.split('?')[1]} came back empty`); break; }
+    p.awards.rows.push(...more.awards.rows);
+    p.awards.pagerHrefs = more.awards.pagerHrefs;
+    p.awards.summary = more.awards.summary;
+    p.awards.complete = !!(more.awards.summary && more.awards.summary.to >= more.awards.summary.total);
+  }
   for (const w of p.warnings) if (!/PAGE, do not trust|awards:/.test(w)) warn(w);
   const unreadable = p.ledger.rows.filter((r) => r.verified === true && !Number.isInteger(r.hundredths));
   if (unreadable.length) throw new PullError('parse', `girl ${girl.id}: ${unreadable.length} approved ledger rows had unreadable hours — refusing to compute stars on a partial ledger`);
@@ -119,7 +137,7 @@ async function pullServiceState(db, cfg, { sessionFactory = ahgpull.makeLiveSess
 
   return recordRun(db, 'pull', async () => {
     const summary = {
-      kind: 'service', girls: girls.length, requests: 0, ledgerRows: 0, instances: 0, baselines: 0,
+      kind: 'service', girls: girls.length, requests: 0, ledgerRows: 0, instances: 0, awardRecords: 0, baselines: 0,
       proposed: 0, withdrawn: 0, recorded: 0, conflicts: 0, crossCheck: [], warnings: [],
     };
     let session;
@@ -180,6 +198,31 @@ async function pullServiceState(db, cfg, { sessionFactory = ahgpull.makeLiveSess
               db.prepare('UPDATE award_instances SET missing_since = ? WHERE girl_id = ? AND ahg_award_id = ? AND ad_record_id = ?').run(ts, girl.id, inst.awardId, k.ad_record_id);
             }
           }
+        }
+        // every other award's whole record (stars are read in full above)
+        const starIds = new Set(Object.values(stars.STAR_AWARD_IDS));
+        const saved = profile.awards.rows.filter((r) => r.awardId && r.adId && r.completedOn && !starIds.has(r.awardId));
+        for (const r of saved) {
+          db.prepare(`INSERT INTO award_instances (girl_id, ahg_award_id, ad_record_id, completed_on, awarded_on, purchased, first_seen_at, fetched_at, missing_since)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                      ON CONFLICT(girl_id, ahg_award_id, ad_record_id) DO UPDATE SET completed_on = excluded.completed_on, awarded_on = excluded.awarded_on,
+                        purchased = excluded.purchased, fetched_at = excluded.fetched_at, missing_since = NULL`)
+            .run(girl.id, r.awardId, r.adId, r.completedOn, r.awardedOn, r.purchased ? 1 : 0, ts, ts);
+          summary.awardRecords += 1;
+        }
+        if (profile.awards.complete) {
+          const seenAd = new Set(saved.map((r) => r.adId));
+          for (const k of db.prepare('SELECT ahg_award_id, ad_record_id FROM award_instances WHERE girl_id = ? AND missing_since IS NULL').all(girl.id)) {
+            if (!starIds.has(k.ahg_award_id) && !seenAd.has(k.ad_record_id)) {
+              db.prepare('UPDATE award_instances SET missing_since = ? WHERE girl_id = ? AND ahg_award_id = ? AND ad_record_id = ?').run(ts, girl.id, k.ahg_award_id, k.ad_record_id);
+            }
+          }
+        }
+        // what came from AHGFamily counts at the level she was then (the ledger is fresh here)
+        for (const c of db.prepare(`SELECT c.id, c.completed_on, c.level_at_completion, b.level_group FROM completions c
+          JOIN requirements r ON r.id = c.requirement_id JOIN badges b ON b.id = r.badge_id WHERE c.girl_id = ? AND c.source = 'ahgfamily'`).all(girl.id)) {
+          const lvl = levelForCompletion(db, girl, c.level_group, c.completed_on);
+          if (lvl !== c.level_at_completion) db.prepare('UPDATE completions SET level_at_completion = ? WHERE id = ?').run(lvl, c.id);
         }
         // the math, proposals, conflicts, cross-check
         const r = reconcileGirl(db, girl, { fetchedLevels: instances.map((i) => i.level), eligibility: profile.eligibility.rows, actor, ts });

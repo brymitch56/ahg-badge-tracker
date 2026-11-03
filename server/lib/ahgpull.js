@@ -29,6 +29,7 @@ const mapping = require('./mapping');
 const ahgtrust = require('./ahgtrust');
 const { recordRun } = require('./mirror');
 const { pulledAwardIds } = require('./awards');
+const { wholeAward, levelForCompletion } = require('./awardrecords');
 
 class PullError extends Error {
   constructor(code, msg) { super(msg); this.code = code; }
@@ -233,7 +234,7 @@ function reconcile(db, badges, summary, actor) {
         // complete on AHGFamily, unknown here → confirmed, source ahgfamily
         const r = db.prepare(`INSERT INTO completions (girl_id, requirement_id, status, completed_on, source, level_at_completion, proposed_at, decided_by, decided_at)
                               VALUES (?, ?, 'confirmed', ?, 'ahgfamily', ?, ?, ?, ?)`)
-          .run(s.girl_id, s.requirement_id, s.earned_on, s.ahg_level, ts, actor, ts);
+          .run(s.girl_id, s.requirement_id, s.earned_on, levelForCompletion(db, { id: s.girl_id, ahg_level: s.ahg_level }, badge.level_group, s.earned_on), ts, actor, ts);
         db.prepare('INSERT INTO audit_log (at, actor, action, entity, entity_id, before, after) VALUES (?, ?, ?, ?, ?, ?, ?)')
           .run(ts, actor, 'completion.from_ahgfamily', 'completion', String(r.lastInsertRowid), null,
             JSON.stringify({ girlId: s.girl_id, requirementId: s.requirement_id, completedOn: s.earned_on }));
@@ -247,7 +248,8 @@ function reconcile(db, badges, summary, actor) {
         // unless a conflict says a human should look first
         const conflicted = db.prepare("SELECT 1 FROM conflicts WHERE girl_id = ? AND requirement_id = ? AND status = 'open'").get(s.girl_id, s.requirement_id);
         const queued = db.prepare("SELECT 1 FROM push_queue WHERE completion_id = ? AND status IN ('queued', 'sent')").get(local.id);
-        if (!conflicted && !queued) {
+        // an award AHGFamily already holds as complete needs no boxes ticked
+        if (!conflicted && !queued && !wholeAward(db, s.girl_id, badge.ahg_award_id)) {
           db.prepare(`INSERT INTO push_queue (girl_id, requirement_id, badge_id, completion_id, action, date, created_at)
                       VALUES (?, ?, ?, ?, 'mark', ?, ?)`)
             .run(s.girl_id, s.requirement_id, badge.id, local.id, local.completed_on, ts);

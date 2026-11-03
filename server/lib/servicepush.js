@@ -273,6 +273,11 @@ async function pushRequirementMarks(db, cfg, { sessionFactory = ahgpull.makeLive
   if (latch) throw new PullError('latched', `AHGFamily is latched since ${latch.latchedAt} (${latch.error}) — press Connect on the Admin page (or re-enter credentials) to clear`);
   if (!mapping.hasStoredCredentials(db, key)) throw new PullError('noconfig', 'no AHGFamily credentials — enter them via the admin screen');
   const { requirementNote } = require('./reqnote');
+  // an award AHGFamily already holds as complete needs no boxes ticked
+  db.prepare(`UPDATE push_queue SET status = 'skipped', last_error = 'award already complete on AHGFamily'
+    WHERE action = 'mark' AND status = 'queued' AND id IN (SELECT q.id FROM push_queue q
+      JOIN requirements r ON r.id = q.requirement_id JOIN badges b ON b.id = r.badge_id
+      JOIN award_instances ai ON ai.girl_id = q.girl_id AND ai.ahg_award_id = b.ahg_award_id AND ai.missing_since IS NULL AND ai.completed_on IS NOT NULL)`).run();
 
   const rows = db.prepare(`SELECT q.*, r.ahg_requirement_id, r.number, r.letter, b.ahg_award_id AS award_id, b.name AS badge_name
                            FROM push_queue q JOIN requirements r ON r.id = q.requirement_id JOIN badges b ON b.id = r.badge_id
