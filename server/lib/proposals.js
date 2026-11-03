@@ -391,10 +391,11 @@ function deleteCompletion(db, id, actor, { afterAhgRemoval = false } = {}) {
  * AHGFamily (awardrecords.js) also makes it complete, boxes ticked or not.
  */
 function badgeStatusFor(db, girlId, badgeId) {
-  const groups = db.prepare('SELECT * FROM badge_groups WHERE badge_id = ? ORDER BY position').all(badgeId);
+  const whole = wholeAward(db, girlId, (db.prepare('SELECT ahg_award_id FROM badges WHERE id = ?').get(badgeId) || {}).ahg_award_id);
   const confirmed = new Set(db.prepare(`SELECT c.requirement_id FROM completions c JOIN requirements r ON r.id = c.requirement_id
                                         WHERE c.girl_id = ? AND r.badge_id = ? AND c.status = 'confirmed'`).all(girlId, badgeId).map((x) => x.requirement_id));
-  const whole = wholeAward(db, girlId, (db.prepare('SELECT ahg_award_id FROM badges WHERE id = ?').get(badgeId) || {}).ahg_award_id);
+  if (whole) return { status: 'complete', confirmedCount: confirmed.size, wholeAward: whole };
+  const groups = db.prepare('SELECT * FROM badge_groups WHERE badge_id = ? ORDER BY position').all(badgeId);
   let complete = groups.length > 0;
   for (const gr of groups) {
     const reqs = db.prepare('SELECT id FROM requirements WHERE group_id = ? AND active = 1').all(gr.id).map((x) => x.id);
@@ -402,7 +403,6 @@ function badgeStatusFor(db, girlId, badgeId) {
     const need = gr.rule_type === 'n_of' ? Math.min(gr.rule_n || reqs.length, reqs.length) : reqs.length;
     if (done < need) complete = false;
   }
-  if (whole) return { status: 'complete', confirmedCount: confirmed.size, wholeAward: whole };
   return { status: complete ? 'complete' : confirmed.size ? 'in_progress' : 'not_started', confirmedCount: confirmed.size };
 }
 
