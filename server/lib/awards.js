@@ -89,9 +89,9 @@ const badgesTouched = (db, girlId) => db.prepare(`SELECT b.* FROM badges b WHERE
   ) ORDER BY b.name`).all(girlId, girlId);
 
 /** Her finished frontier badges at a level: frontier → [{ name, completedOn }], earliest first. */
-function frontierBadges(db, girl, level) {
+function frontierBadges(db, girl, level, touched) {
   const out = new Map();
-  for (const b of badgesTouched(db, girl.id)) {
+  for (const b of touched) {
     if (!b.frontier || !covers(b.level_group, level)) continue;
     const st = faith.finishedAt(db, girl, b, level);
     if (st.status !== 'complete') continue;
@@ -115,12 +115,16 @@ function catholicDone(db, girl, level) {
 }
 
 /** requirementId → { why, completedOn } for items her record already proves. */
-function readyItems(db, girl, level, award) {
+function readyItems(db, girl, level, award, touched) {
   const d = (awardsConfig().derive || {})[level];
   const ready = new Map();
   if (!d) return ready;
-  const frontiers = frontierBadges(db, girl, level);
-  const faithAward = badgesTouched(db, girl.id).some((b) => b.faith) ? faith.girlAwardAtLevel(db, girl, level) : null;
+  const frontiers = frontierBadges(db, girl, level, touched);
+  // the Faith Award's full status is the slow part: only when its record doesn't already answer
+  const faithAwardId = (faith.faithConfig().faithAward || {})[level];
+  const faithOn = wholeAward(db, girl.id, faithAwardId);
+  const faithAward = faithOn ? { status: 'earned', earned: [{ completedOn: faithOn }], offline: [] }
+    : touched.some((b) => b.faith) ? faith.girlAwardAtLevel(db, girl, level) : null;
   const segments = catholicDone(db, girl, level);
   const years = serviceYears(db, girl.id, level).filter((y) => y.hours >= d.serviceHours);
   for (const r of db.prepare('SELECT * FROM requirements WHERE badge_id = ? AND active = 1').all(award.id)) {
@@ -167,11 +171,11 @@ function girlAward(db, girl, badge, ready = new Map()) {
 }
 
 /** Where she stands on Stars & Stripes: the prerequisite, the required badges and the marked steps. */
-function starsStatus(db, girl) {
+function starsStatus(db, girl, touched) {
   const c = awardsConfig();
   const s = c.starsAndStripes;
   if (!s) return null;
-  const badges = badgesTouched(db, girl.id).filter((b) => b.level_group === 'Pioneer/Patriot');
+  const badges = touched.filter((b) => b.level_group === 'Pioneer/Patriot');
   const finished = (name) => {
     const b = badges.find((x) => norm(x.name) === norm(name));
     return b && badgeStatusFor(db, girl.id, b.id).status === 'complete' ? b : null;
@@ -203,9 +207,10 @@ function awardsStatus(db) {
   return {
     girls: girls.map((g) => {
       const awards = {};
+      const touched = badgesTouched(db, g.id);
       for (const level of LEVELS.slice(0, LEVELS.indexOf(g.ahg_level) + 1)) {
         const la = badgeByAward(db, c.levelAwards[level]);
-        if (la) awards[la.id] = { ...girlAward(db, g, la, readyItems(db, g, level, la)), serviceYears: serviceYears(db, g.id, level) };
+        if (la) awards[la.id] = { ...girlAward(db, g, la, readyItems(db, g, level, la, touched)), serviceYears: serviceYears(db, g.id, level) };
         for (const id of c.catholic[level] || []) {
           const b = badgeByAward(db, id);
           if (b) awards[b.id] = girlAward(db, g, b);
@@ -215,7 +220,7 @@ function awardsStatus(db) {
       return {
         girlId: g.id, firstName: g.first_name, lastName: g.last_name, nickname: g.nickname, ahgLevel: g.ahg_level, mapped: !!g.ahg_youth_id,
         awards,
-        starsAndStripes: g.ahg_level === 'Pioneer' || g.ahg_level === 'Patriot' ? starsStatus(db, g) : null,
+        starsAndStripes: g.ahg_level === 'Pioneer' || g.ahg_level === 'Patriot' ? starsStatus(db, g, touched) : null,
       };
     }),
   };
